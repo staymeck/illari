@@ -1,0 +1,221 @@
+# Trading lab configuration
+# All dates are UTC, ISO 8601 format.
+
+exchange: binance
+pair: BTC/USDT
+
+# Timeframes used in the top-down multi-timeframe analysis.
+timeframes:
+  bias: 1d      # global bias/trend
+  structure: 1h # structure and intermediate Fibonacci zones (only used by the confluence strategy)
+  entry: 5m     # entry timing
+
+# Two 36-month historical scenarios with different market conditions
+# (extended from 12 months to give variants with few signals — e.g.
+# confluence/geometry_1.5x — a better chance of reaching a statistically
+# significant sample). Not "magic" dates, just illustrative.
+scenarios:
+  - name: bull_trend_2023_2025
+    description: "Background bull trend 2023-2025 (recovery + new highs)"
+    start: "2023-01-01T00:00:00Z"
+    end: "2025-12-31T00:00:00Z"
+
+  - name: mixed_volatility_2019_2022
+    description: "2019 range + 2020 COVID crash + 2021 big rally + 2022 bear — the opposite of a clean, sustained trend"
+    start: "2019-07-01T00:00:00Z"
+    end: "2022-06-30T00:00:00Z"
+
+# Each strategy registered in trading_lab/strategy/registry.py has its own
+# base parameters and its own variants (overrides on top of those base
+# parameters) — used to compare configurations WITHIN a strategy and,
+# above all, to compare DIFFERENT strategies against each other in the same
+# lab. Each strategy's "base" variant is the one used for the candlestick
+# chart and the per-ingredient probability table in the report.
+strategies:
+  - name: confluence
+    strategy_class: confluence  # see trading_lab/strategy/registry.py
+    base_params:
+      # Structure / swings
+      swing_lookback: 5          # candles on each side to confirm a swing high/low
+
+      # Fibonacci
+      fib_zone_min: 0.5
+      fib_zone_max: 0.618
+
+      # Volume
+      volume_lookback: 20        # candles used to compute average volume
+      volume_min_ratio: 0.8      # entry candle volume >= 0.8x the average
+
+      # Analytic geometry: support/resistance line via least squares over
+      # the most recent structure (1h) swings.
+      trendline_min_points: 3    # minimum swings needed to fit a line
+      trendline_max_points: 6    # maximum recent swings used in the fit
+      trendline_proximity_atr_mult: 1.0  # "near the line" = distance <= this multiple of ATR
+      trendline_bonus_enabled: true      # informational bonus to the confidence score (doesn't filter)
+      trendline_required: false          # if True, geometry becomes a MANDATORY condition (actually filters)
+
+      # Risk management
+      risk_per_trade_pct: 1.0
+      atr_period: 14
+      atr_sl_multiplier: 1.5
+      reward_risk_ratio: 2.0
+
+      # Costs (backtest realism)
+      commission_pct: 0.1        # commission per side (Binance spot ~0.1%)
+      slippage_pct: 0.05
+
+      # Probability analysis: forward horizon (1h = 12 candles of 5m).
+      probability_horizon_bars: 12
+
+    variants:
+      - name: base
+        detailed: true  # chart + probability/significance table in the report
+        overrides: {}
+
+      - name: wide_fib_zone
+        description: "Wider confluence zone (0.382-0.786 instead of 0.5-0.618)"
+        overrides:
+          fib_zone_min: 0.382
+          fib_zone_max: 0.786
+
+      - name: short_swing
+        description: "More sensitive swings (lookback 3 instead of 5) -> more reactive structure"
+        overrides:
+          swing_lookback: 3
+
+      - name: conservative_rr
+        description: "Closer take profit (reward/risk 1.5 instead of 2.0)"
+        overrides:
+          reward_risk_ratio: 1.5
+
+      - name: no_geometry
+        description: "Without the trendline-proximity bonus (to measure its contribution)"
+        overrides:
+          trendline_bonus_enabled: false
+
+      - name: geometry_required
+        description: "Mandatory geometry, strict threshold (1.0x ATR) -> few signals, high result but no statistical significance (see earlier report)"
+        detailed: true
+        overrides:
+          trendline_required: true
+
+      - name: geometry_1.5x
+        description: "Mandatory geometry, looser threshold (1.5x ATR) -> looks for more signals without losing the filter"
+        detailed: true
+        overrides:
+          trendline_required: true
+          trendline_proximity_atr_mult: 1.5
+
+      - name: geometry_2.5x
+        description: "Mandatory geometry, much looser threshold (2.5x ATR)"
+        detailed: true
+        overrides:
+          trendline_required: true
+          trendline_proximity_atr_mult: 2.5
+
+      - name: geometry_2.5x_min2
+        description: "Same as geometry_2.5x, but the line can be fit with only 2 swings (instead of 3) -> available sooner, even more signals"
+        detailed: true
+        overrides:
+          trendline_required: true
+          trendline_proximity_atr_mult: 2.5
+          trendline_min_points: 2
+
+  - name: breakout_donchian
+    strategy_class: breakout  # see trading_lab/strategy/registry.py
+    base_params:
+      donchian_period_bars: 96   # channel window (5m * 96 = 8h)
+      swing_lookback: 5          # for the daily bias (reuses confluence's prepare_bias_df)
+      volume_lookback: 20
+      atr_period: 14
+      atr_sl_multiplier: 1.5
+      reward_risk_ratio: 2.0
+      risk_per_trade_pct: 1.0
+      commission_pct: 0.1
+      slippage_pct: 0.05
+      probability_horizon_bars: 12
+
+      # Filters (disabled by default in the base variant, to preserve the
+      # original behavior) — see breakout_strategy.py docstring. Aimed at
+      # over-trading: the base variant reached 972 trades/year and lost
+      # ~100% of capital.
+      atr_expansion_lookback: 20
+      min_channel_width_atr_mult: 0.0        # 0 = disabled
+      volatility_expansion_required: false   # coincident filter (expansion already underway)
+      narrow_range_lookback: 7               # classic NR7 (Crabel)
+      narrow_range_required: false           # anticipatory filter (compression before the move)
+
+    variants:
+      - name: base
+        detailed: true
+        overrides: {}
+
+      - name: short_channel
+        description: "4h channel instead of 8h -> more breakouts, more noise"
+        overrides:
+          donchian_period_bars: 48
+
+      - name: long_channel
+        description: "24h channel -> fewer breakouts, in theory more significant"
+        overrides:
+          donchian_period_bars: 288
+
+      - name: volatility_filter
+        description: "Requires a wide channel (>=2x ATR) and expanding volatility (ATR > its own average) -> aims to cut the over-trading of the base variant"
+        detailed: true
+        overrides:
+          min_channel_width_atr_mult: 2.0
+          volatility_expansion_required: true
+
+      - name: volatility_filter_long_channel
+        description: "Same volatility filter, combined with the 24h channel (fewer breakouts on its own)"
+        overrides:
+          donchian_period_bars: 288
+          min_channel_width_atr_mult: 2.0
+          volatility_expansion_required: true
+
+      - name: nr7_filter
+        description: "Anticipatory filter (Crabel): requires the candle right before the breakout to have been narrow-range (NR7), instead of measuring already-underway volatility expansion"
+        detailed: true
+        overrides:
+          narrow_range_required: true
+
+      - name: nr7_and_volatility_filter
+        description: "Combines NR7 (anticipatory) with the wide-channel + volatility-expansion filter (coincident) -> the strictest filter tested"
+        overrides:
+          narrow_range_required: true
+          min_channel_width_atr_mult: 2.0
+          volatility_expansion_required: true
+
+      # --- Fade: invert the breakout, exploiting the NEGATIVE edge that the
+      # probability analysis confirmed with statistical significance (p≈0
+      # in both 36-month scenarios) in the base variant's signals — instead
+      # of following the breakout, the reversal is traded. ---
+      - name: fade_base
+        description: "Exactly inverts the base variant's signal (same conditions: breakout + aligned daily bias, inverted direction)"
+        detailed: true
+        overrides:
+          fade: true
+
+      - name: fade_no_bias
+        description: "Fade without requiring alignment with the daily bias -> any breakout is traded against, more signals (compares whether the bias helped or diluted the edge)"
+        detailed: true
+        overrides:
+          fade: true
+          require_bias_alignment: false
+
+      - name: fade_with_nr7
+        description: "Fade combined with the NR7 filter (the most effective one at cutting over-trading) -> is the reversal more reliable after a prior compression?"
+        detailed: true
+        overrides:
+          fade: true
+          narrow_range_required: true
+
+      - name: fade_conservative_rr
+        description: "Fade with closer take profit (reward/risk 1.0) -> reversals tend to be shorter moves than trend continuations"
+        overrides:
+          fade: true
+          reward_risk_ratio: 1.0
+
+# Simulated initial capital for the backtest.
+initial_capital: 10000
