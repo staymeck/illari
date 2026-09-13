@@ -21,6 +21,7 @@ from src.strategies.context.ma_trend import ma_trend
 from src.strategies.context.probability_trend import probability_trend
 from src.strategies.risk.atr_stop import atr_stop
 from src.strategies.risk.fixed_pct import fixed_pct_stop, risk_reward_target
+from src.strategies.risk.regime_adaptive_stop import regime_adaptive_stop
 from src.strategies.setups.breakout import breakout
 from src.strategies.setups.mean_reversion import mean_reversion
 from src.strategies.setups.scheduled_entry import scheduled_entry
@@ -440,3 +441,37 @@ def test_scheduled_entry_piece_none_outside_the_configured_hour():
     ctx = EvalContext(price_window=df, marked_window=pd.DataFrame())
 
     assert scheduled_entry(ctx, {"entry_hour": 3}) is None
+
+
+def test_regime_adaptive_stop_wider_when_volatility_is_high():
+    # 100 bars of low, steady range, then one much wider bar right at the
+    # end -> current volatility sits near the top of its own distribution,
+    # so the stop should use a multiple close to max_multiple (3.0), not
+    # base_multiple (1.0).
+    n = 120
+    high = [101.0] * (n - 1) + [120.0]
+    low = [100.0] * (n - 1) + [90.0]
+    close = [100.5] * (n - 1) + [105.0]
+    df = pd.DataFrame({"high": high, "low": low, "close": close})
+    ctx = EvalContext(price_window=df, marked_window=pd.DataFrame())
+    setup = SetupResult(reference_level=100.0)
+
+    stop = regime_adaptive_stop(
+        entry_price=110.0, setup=setup, ctx=ctx,
+        params={"period": 14, "lookback": 100, "base_multiple": 1.0, "max_multiple": 3.0},
+    )
+
+    from src.analysis.volatility import atr
+    last_atr = atr(df, period=14).iloc[-1]
+    # distance from entry should be well above 1x ATR (base_multiple), close to 3x
+    assert (110.0 - stop) > 2.0 * last_atr
+
+
+def test_regime_adaptive_stop_falls_back_when_not_enough_data():
+    df = pd.DataFrame({"high": [102.0, 103.0], "low": [100.0, 101.0], "close": [101.0, 102.0]})
+    ctx = EvalContext(price_window=df, marked_window=pd.DataFrame())
+    setup = SetupResult(reference_level=100.0)
+
+    stop = regime_adaptive_stop(entry_price=110.0, setup=setup, ctx=ctx, params={"period": 14})
+
+    assert stop == 110.0 * 0.995

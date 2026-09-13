@@ -1,0 +1,62 @@
+# trend_pullback_htf.yaml, but the stop is regime_adaptive instead of
+# fixed_pct: the ATR multiple scales with where CURRENT volatility sits in
+# its own recent history, instead of one constant multiple for every
+# market/timeframe. Combines this session's two strongest, most
+# well-grounded leads: multi-timeframe confirmation (Kaufman ch. 19) and
+# market-condition-based adaptation (Kaufman ch. 17), as opposed to
+# adapting to the strategy's own results (explicitly rejected — see
+# docs/PLAN.md). Needs the caller to pass higher_tf_df, same as
+# trend_pullback_htf.yaml.
+name: trend_pullback_htf_adaptive
+
+engine:
+  lookback_bars: 200
+  swing_order: 3
+
+context:
+  piece: dow_trend
+  required: uptrend
+  params:
+    order: 3
+    lookback_swings: 2
+
+setup:
+  piece: support_touch
+  params:
+    order: 3
+    tolerance_pct: 1.0
+
+confirmations:
+  - piece: higher_tf_trend
+    params:
+      required: uptrend
+      order: 3
+      lookback_swings: 2
+  - piece: fibonacci
+    params:
+      order: 3
+      tolerance_pct: 1.0
+  - piece: candlestick
+  - piece: volume
+    params:
+      window: 20
+      spike_threshold: 1.2
+      min_bias: 0.1
+
+risk:
+  stop:
+    piece: regime_adaptive
+    params:
+      period: 14
+      lookback: 100
+      base_multiple: 1.0
+      max_multiple: 3.0
+  target:
+    piece: risk_reward
+    params:
+      ratio: 2.0
+
+style:
+  max_holding_bars: 24
+  fee_pct: 0.1
+  initial_equity: 10000.0
