@@ -12,16 +12,18 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from src.backtest.engine import BacktestConfig, compute_metrics, run_backtest
+from src.backtest.engine import compute_metrics, run_backtest
 from src.data.fetcher import earliest_available, fetch_ohlcv
 from src.report.render import write_run_report
 from src.report.summary import RunResult, write_summary_report
+from src.strategies.builder import load_strategy
 
 SYMBOL = "BTC/USDT"
 TIMEFRAME = "1h"
 SCENARIO = "minimal_validation_2024h2"
 SINCE = "2024-06-01"
 UNTIL = "2024-12-01"
+STRATEGY_PATH = Path(__file__).resolve().parents[1] / "config" / "strategies" / "trend_pullback_fib.yaml"
 
 
 def main() -> None:
@@ -37,9 +39,9 @@ def main() -> None:
         print("No candles were downloaded — cannot continue.")
         return
 
-    cfg = BacktestConfig()
-    trades, equity_curve = run_backtest(df, cfg)
-    metrics = compute_metrics(trades, equity_curve, cfg.initial_equity)
+    strategy = load_strategy(STRATEGY_PATH)
+    trades, equity_curve = run_backtest(df, strategy)
+    metrics = compute_metrics(trades, equity_curve, strategy.initial_equity)
 
     print("\nMetrics:")
     for key, value in metrics.items():

@@ -11,15 +11,23 @@ free, with no change to the algorithm itself.
 from __future__ import annotations
 
 from concurrent.futures import ProcessPoolExecutor, as_completed
-from dataclasses import dataclass, field
+from dataclasses import dataclass
+from pathlib import Path
 from typing import Callable
 
 import pandas as pd
 
-from src.backtest.engine import BacktestConfig, compute_metrics, run_backtest
+from src.backtest.engine import compute_metrics, run_backtest
 from src.data.fetcher import fetch_ohlcv
+from src.strategies.builder import load_strategy
 
 FetchFn = Callable[..., pd.DataFrame]
+
+# The catalog strategy that reproduces the engine's original hardcoded
+# behavior — see config/strategies/trend_pullback_fib.yaml and docs/PLAN.md.
+DEFAULT_STRATEGY_PATH = str(
+    Path(__file__).resolve().parents[2] / "config" / "strategies" / "trend_pullback_fib.yaml"
+)
 
 
 @dataclass(frozen=True)
@@ -29,7 +37,7 @@ class BacktestJob:
     since: str
     until: str
     scenario: str = "default"
-    config: BacktestConfig = field(default_factory=BacktestConfig)
+    strategy_path: str = DEFAULT_STRATEGY_PATH
 
 
 @dataclass(frozen=True)
@@ -41,10 +49,12 @@ class BacktestJobResult:
 
 def _run_job(job: BacktestJob, fetch_fn: FetchFn) -> BacktestJobResult:
     """Executed inside a worker process: fetch that job's data (cached to disk
-    per src/data/fetcher.py) and run its backtest in isolation."""
+    per src/data/fetcher.py), resolve its strategy from YAML (see
+    src.strategies.builder), and run the backtest in isolation."""
     df = fetch_fn(job.symbol, job.timeframe, since=job.since, until=job.until)
-    trades, equity_curve = run_backtest(df, job.config)
-    metrics = compute_metrics(trades, equity_curve, job.config.initial_equity)
+    strategy = load_strategy(job.strategy_path)
+    trades, equity_curve = run_backtest(df, strategy)
+    metrics = compute_metrics(trades, equity_curve, strategy.initial_equity)
     return BacktestJobResult(job=job, trades=trades, metrics=metrics)
 
 
