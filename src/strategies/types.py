@@ -19,10 +19,19 @@ class EvalContext:
     pivots confirmed as of the current bar (see src/backtest/engine.py) —
     only structure-based pieces (dow_trend, support_touch, fibonacci) use it;
     others (moving averages, RSI, VWAP, ...) just ignore it.
+
+    `higher_tf_window` (optional, None unless the engine was given a second,
+    higher timeframe's data — see src/backtest/engine.run_backtest's
+    `higher_tf_df` parameter) is the trailing window of *already-closed*
+    higher-timeframe candles as of the current bar — used by
+    confirmations/higher_tf_trend.py (Kaufman, Trading Systems and Methods,
+    ch. 19 "Multiple Time Frames"). Pieces that don't need it just ignore it,
+    same as marked_window.
     """
 
     price_window: pd.DataFrame
     marked_window: pd.DataFrame
+    higher_tf_window: pd.DataFrame | None = None
 
 
 @dataclass(frozen=True)

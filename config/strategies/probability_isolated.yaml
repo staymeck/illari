@@ -1,0 +1,43 @@
+# Isolated version of probability_pullback.yaml: probability_trend +
+# support_touch only, no Fibonacci/candlestick/volume confirmations —
+# separates "does the probability table carry any signal at all" from "does
+# it survive being stacked under 4 other strict filters" (the sweep in
+# probability_pullback.yaml showed a cliff at 55-60% with essentially no
+# trades above it, which could mean either). Compare directly against
+# trend_pullback_isolated.yaml. See docs/PLAN.md.
+name: probability_isolated
+
+engine:
+  lookback_bars: 200
+  swing_order: 3
+
+context:
+  piece: probability_trend
+  required: uptrend
+  params:
+    min_probability: 0.55
+    adx_period: 14
+    rsi_period: 14
+
+setup:
+  piece: support_touch
+  params:
+    order: 3
+    tolerance_pct: 1.0
+
+confirmations: []
+
+risk:
+  stop:
+    piece: fixed_pct
+    params:
+      pct_below_reference: 0.5
+  target:
+    piece: risk_reward
+    params:
+      ratio: 2.0
+
+style:
+  max_holding_bars: 24
+  fee_pct: 0.1
+  initial_equity: 10000.0

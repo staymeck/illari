@@ -46,6 +46,14 @@ Stop trigger (`risk.stop.trigger` in the YAML, "intrabar" by default) and the
   had the stop not fired — a direct measurement of how much of the stop-out
   count is "noise" versus a real trend failure (see
   src/report/render.py's breakdown).
+
+Optional multi-timeframe confirmation (Kaufman, ch. 19 "Multiple Time
+Frames" — Elder's Triple Screen, Krausz, Pring's KST all use this same core
+idea: don't take a lower-timeframe signal against the higher-timeframe
+trend): pass `higher_tf_df` to `run_backtest` and add the
+`higher_tf_trend` piece to a strategy's confirmations. Omitting
+`higher_tf_df` (the default) leaves this feature fully inert — identical
+behavior to every run before it existed.
 """
 from __future__ import annotations
 
@@ -167,11 +175,45 @@ def _build_trade_record(
     return trade, equity
 
 
-def run_backtest(df: pd.DataFrame, strategy: ResolvedStrategy) -> tuple[pd.DataFrame, pd.Series]:
+def _higher_tf_window_as_of(
+    higher_tf_df: pd.DataFrame, timestamp: pd.Timestamp, lookback_bars: int, interval: pd.Timedelta
+) -> pd.DataFrame:
+    """Trailing window of `higher_tf_df` containing only candles already
+    *closed* as of `timestamp` — a higher-timeframe candle starting at time
+    `s` isn't knowable until `s + interval`, so it's excluded until then.
+    Used for multi-timeframe confirmation (see EvalContext.higher_tf_window)."""
+    cutoff = timestamp - interval
+    idx = higher_tf_df["timestamp"].searchsorted(cutoff, side="right") - 1
+    if idx < 0:
+        return higher_tf_df.iloc[0:0]
+    start = max(0, idx + 1 - lookback_bars)
+    return higher_tf_df.iloc[start : idx + 1]
+
+
+def run_backtest(
+    df: pd.DataFrame,
+    strategy: ResolvedStrategy,
+    higher_tf_df: pd.DataFrame | None = None,
+    higher_tf_lookback_bars: int = 50,
+) -> tuple[pd.DataFrame, pd.Series]:
     """Simulates `strategy` over `df` (columns: timestamp, open, high, low,
-    close, volume) and returns (trades, equity_curve)."""
+    close, volume) and returns (trades, equity_curve).
+
+    `higher_tf_df` (optional): a second, higher-timeframe OHLCV series (e.g.
+    1d candles while `df` is 1h) — when given, every bar's EvalContext also
+    gets `higher_tf_window`, a trailing window of already-closed
+    higher-timeframe candles, for pieces like
+    confirmations/higher_tf_trend.py. Omitting it (the default) leaves
+    `higher_tf_window` as None everywhere, identical to every strategy run
+    before this parameter existed.
+    """
     df = df.reset_index(drop=True)
     marked_full = find_swing_points(df, order=strategy.swing_order)  # computed once for the whole series
+
+    higher_tf_interval = None
+    if higher_tf_df is not None:
+        higher_tf_df = higher_tf_df.reset_index(drop=True)
+        higher_tf_interval = higher_tf_df["timestamp"].diff().median()
 
     trades: list[dict] = []
     equity = strategy.initial_equity
@@ -189,7 +231,12 @@ def run_backtest(df: pd.DataFrame, strategy: ResolvedStrategy) -> tuple[pd.DataF
             continue
 
         marked_window = _confirmed_pivots_as_of(marked_full, i, window_start, strategy.swing_order)
-        ctx = EvalContext(price_window=price_window, marked_window=marked_window)
+        higher_tf_window = None
+        if higher_tf_df is not None:
+            higher_tf_window = _higher_tf_window_as_of(
+                higher_tf_df, df["timestamp"].iloc[i], higher_tf_lookback_bars, higher_tf_interval
+            )
+        ctx = EvalContext(price_window=price_window, marked_window=marked_window, higher_tf_window=higher_tf_window)
         signal = _find_entry_signal(ctx, strategy)
 
         if signal is None:
