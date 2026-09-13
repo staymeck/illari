@@ -33,7 +33,7 @@ N_FOLDS = 3
 STRATEGY_PATHS = [
     "config/strategies/trend_pullback_fib.yaml",
     "config/strategies/trend_pullback_htf.yaml",
-    "config/strategies/trend_pullback_htf_session.yaml",
+    "config/strategies/trend_pullback_htf_adx.yaml",
 ]
 
 

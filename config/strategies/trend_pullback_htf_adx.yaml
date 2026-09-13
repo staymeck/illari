@@ -1,0 +1,59 @@
+# trend_pullback_htf.yaml + adx_strength: the two most promising, most
+# independently-grounded ideas from this session, combined for the first
+# time (previously only tested separately, or htf combined with session/
+# adaptive-stop instead). See docs/PLAN.md and the Bitácora Illari summary.
+# Needs the caller to pass higher_tf_df, same as trend_pullback_htf.yaml.
+name: trend_pullback_htf_adx
+
+engine:
+  lookback_bars: 200
+  swing_order: 3
+
+context:
+  piece: dow_trend
+  required: uptrend
+  params:
+    order: 3
+    lookback_swings: 2
+
+setup:
+  piece: support_touch
+  params:
+    order: 3
+    tolerance_pct: 1.0
+
+confirmations:
+  - piece: higher_tf_trend
+    params:
+      required: uptrend
+      order: 3
+      lookback_swings: 2
+  - piece: adx_strength
+    params:
+      period: 14
+      min_adx: 25
+  - piece: fibonacci
+    params:
+      order: 3
+      tolerance_pct: 1.0
+  - piece: candlestick
+  - piece: volume
+    params:
+      window: 20
+      spike_threshold: 1.2
+      min_bias: 0.1
+
+risk:
+  stop:
+    piece: fixed_pct
+    params:
+      pct_below_reference: 0.5
+  target:
+    piece: risk_reward
+    params:
+      ratio: 2.0
+
+style:
+  max_holding_bars: 24
+  fee_pct: 0.1
+  initial_equity: 10000.0
