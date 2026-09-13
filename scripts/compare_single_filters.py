@@ -32,11 +32,10 @@ WINDOWS = [
 
 STRATEGY_PATHS = [
     "config/strategies/trend_pullback_htf_minimal.yaml",
-    "config/strategies/trend_pullback_htf_plus_fib.yaml",
-    "config/strategies/trend_pullback_htf_plus_candle.yaml",
     "config/strategies/trend_pullback_htf_plus_volume.yaml",
-    "config/strategies/trend_pullback_htf_plus_adx.yaml",
-    "config/strategies/trend_pullback_htf_plus_session.yaml",
+    "config/strategies/trend_pullback_htf_plus_candle.yaml",
+    "config/strategies/trend_pullback_htf_plus_volume_candle.yaml",
+    "config/strategies/trend_pullback_htf.yaml",  # full chain, for reference
 ]
 
 
