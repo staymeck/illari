@@ -1,180 +1,185 @@
-# Illari — Laboratorio de análisis y trading cuantitativo (Fase 1)
+# Illari — Quantitative trading & analysis lab (Phase 1)
 
-## Contexto
+## Context
 
-Este proyecto (`illari`) venía desarrollándose en una sesión anterior: había un plan
-acordado, un fetcher de datos de Binance, backtests corriendo y un reporte inicial
-(`resources/report.md`, con solo 2 escenarios de muestra muy chica: 18 y 7 operaciones).
-La PC se formateó y se perdió todo ese trabajo — el repositorio ni siquiera tenía
-`git init`. Lo único que sobrevivió son los dos PDF y el reporte viejo en `resources/`.
+This project (`illari`) was already underway in a previous session: there was
+an agreed plan, a Binance data fetcher, backtests running, and an initial
+report (`resources/report.md`, with only 2 sample scenarios of very small
+size: 18 and 7 trades). The PC got reformatted and all of that work was lost —
+the repository wasn't even under `git init`. All that survived are the two
+PDFs and the old report in `resources/`.
 
-Este plan reconstruye desde cero, por escrito y versionado en git, todo lo que se
-había acordado en la conversación previa, para no depender de la memoria de una sesión
-de chat. El objetivo de esta primera fase **no es programar todavía** — es dejar
-documentado el diseño completo del laboratorio para que quede confirmado antes de
-escribir código.
+This plan reconstructs, in writing and version-controlled in git, everything
+that had been agreed in the prior conversation, so it doesn't depend on the
+memory of a chat session. The goal of this first phase **was not to code
+yet** — it was to document the full lab design so it could be confirmed
+before writing any code. (That plan was approved, and the first implementation
+step is now in progress — see `CLAUDE.md`/commit history for current status.)
 
-**Ya hecho en esta sesión:** `git init`, rama `main`, commit inicial con `resources/`.
+**Done in that session:** `git init`, `main` branch, initial commit with
+`resources/`.
 
-## Objetivo del proyecto
+## Project objective
 
-Construir un **laboratorio de backtesting** que evalúe, con reglas objetivas y
-medibles (no una caja negra de IA), qué tan bien habría funcionado una estrategia de
-trading basada en:
+Build a **backtesting lab** that evaluates, with objective and measurable
+rules (not an AI black box), how well a trading strategy would have performed
+based on:
 
-- Estructura de mercado (soportes/resistencias, máximos/mínimos, rupturas)
-- Geometría analítica sobre velas (líneas de tendencia, canales, retrocesos de Fibonacci
-  como zonas de confluencia — no como señal aislada)
-- Patrones de vela combinados con contexto (no patrones sueltos)
-- Presión compradora/vendedora (volumen, y funding rate como proxy de sesgo del mercado)
-- La hora/sesión de entrada al mercado, como variable de análisis
+- Market structure (support/resistance, higher/lower highs and lows, breaks of structure)
+- Analytic geometry applied to candles (trendlines, channels, Fibonacci
+  retracements as confluence zones — not as a standalone signal)
+- Candlestick patterns combined with context (never isolated patterns)
+- Buying/selling pressure (volume, and funding rate as a proxy for market bias)
+- The hour/session of entry into the market, as an analysis variable
 
-Filosofía explícita (ya acordada): no se busca "predecir" el mercado de forma
-determinista. Se busca medir probabilidades con reglas objetivas y backtesting
-riguroso — la mayoría de bots fallan por saltarse el rigor de esta fase, no por la
-estrategia en sí.
+Explicit philosophy (already agreed): the goal is not to "predict" the market
+deterministically. The goal is to measure probabilities with objective rules
+and rigorous backtesting — most bots fail by skipping the rigor of this phase,
+not because of the strategy itself.
 
-### Las 3 fases del proyecto (visión completa, foco actual en Fase 1)
+### The project's 3 phases (full vision, current focus on Phase 1)
 
-1. **Laboratorio histórico (foco de este plan):** correr la estrategia sobre datos
-   pasados de varios mercados/escenarios y medir resultados (retorno, drawdown,
-   win-rate, profit factor, desglose por hora/sesión).
-2. **Señales en tiempo actual (a futuro):** mismo motor de análisis corriendo sobre
-   datos en vivo, generando un "snapshot" de la condición actual del mercado y su
-   probabilidad histórica asociada — sin ejecutar nada todavía.
-3. **Ejecución automática (a futuro, condicionada):** solo si las Fases 1 y 2
-   muestran resultados consistentes, conectar a un exchange para operar solo.
+1. **Historical lab (focus of this plan):** run the strategy over past data
+   across several markets/scenarios and measure results (return, drawdown,
+   win rate, profit factor, breakdown by hour/session).
+2. **Live signals (future):** the same analysis engine running on live data,
+   producing a "snapshot" of the market's current condition and its
+   associated historical probability — without executing anything yet.
+3. **Automated execution (future, conditional):** only if Phases 1 and 2 show
+   consistent results, connect to an exchange to trade autonomously.
 
-## Alcance de la Fase 1
+## Phase 1 scope
 
-### Mercados (todos en Binance, vía la misma API — sin infraestructura nueva)
+### Markets (all on Binance, via the same API — no new infrastructure)
 
-| Símbolo | Rol |
+| Symbol | Role |
 |---|---|
-| BTC/USDT | Referencia base, cripto "blue chip" |
-| ETH/USDT | Blue chip con dinámica propia (DeFi/contratos) |
-| PAXG/USDT | Oro tokenizado — único activo no-cripto real del set, sin sumar fuente de datos nueva |
-| SOL/USDT o BNB/USDT | Altcoin de mayor beta/volatilidad |
-| DOGE/USDT | Guiada por sentimiento/redes, no por fundamentos — dinámica genuinamente distinta |
+| BTC/USDT | Base reference, blue-chip crypto |
+| ETH/USDT | Blue chip with its own dynamics (DeFi/smart contracts) |
+| PAXG/USDT | Tokenized gold — the only genuinely non-crypto asset in the set, no new data source needed |
+| SOL/USDT or BNB/USDT | Higher-beta/volatility altcoin |
+| DOGE/USDT | Driven by sentiment/social media, not fundamentals — genuinely different dynamics |
 
-**Advertencia a tener en cuenta al implementar:** no todos cotizan desde la misma
-fecha en Binance (p. ej. SOL se lista después que BTC/ETH). Antes de fijar fechas de
-escenario hay que chequear la fecha real de listado de cada símbolo contra la API, y
-ajustar la ventana por activo en vez de forzar el mismo rango para los 5.
+**Implementation caveat:** not all of them have traded on Binance since the
+same date (e.g. SOL was listed after BTC/ETH). Before fixing scenario dates,
+each symbol's real listing date must be checked against the API, and the
+window adjusted per asset instead of forcing the same range for all 5.
 
-### Contextos temporales (multi-timeframe, visión global del mercado)
+### Time contexts (multi-timeframe, global market view)
 
-Se corre el mismo análisis en tres marcos de tiempo para no perder la vista global:
+The same analysis runs across three timeframes so the global view isn't lost:
 
-- **5 minutos** — entradas/timing fino
-- **1 hora** — contexto de tendencia intermedia
-- **1 día** — contexto de tendencia global (¿el mercado de fondo es alcista, bajista o lateral?)
+- **5 minutes** — fine-grained entries/timing
+- **1 hour** — intermediate trend context
+- **1 day** — global trend context (is the underlying market bullish, bearish, or sideways?)
 
-### Hora de entrada como variable de análisis (no de ejecución todavía)
+### Entry hour as an analysis variable (not execution, yet)
 
-Se etiqueta cada operación simulada con su hora UTC y su sesión de mercado (Asia,
-Londres, Nueva York, solapamiento Londres-NY, fuera de horario) y se reporta el
-desglose de rendimiento por hora/sesión — tal como ya mostraba el reporte viejo
-(`resources/report.md`, sección "Desglose por hora de entrada" y "por sesión"). Es
-decir: **solo análisis por ahora**, con zona horaria de referencia **UTC**. Si algún
-patrón horario resulta consistente y significativo, se evalúa más adelante si vale la
-pena convertirlo en filtro de entrada.
+Every simulated trade is tagged with its UTC hour and market session (Asia,
+London, New York, London-NY overlap, off-hours), and performance is reported
+broken down by hour/session — just like the old report already did
+(`resources/report.md`, "Breakdown by entry hour" and "by session" sections).
+In other words: **analysis only for now**, with **UTC** as the reference time
+zone. If any hourly pattern turns out to be consistent and significant, it
+will be evaluated later as a possible entry filter.
 
-### Componentes del motor de análisis técnico
+### Technical analysis engine components
 
-1. **Estructura de mercado:** reglas objetivas de código (no "a ojo") para
-   máximos/mínimos crecientes o decrecientes, rupturas de estructura, zonas de
-   soporte/resistencia.
-2. **Fibonacci:** usado como zona de confluencia (filtro de interés), nunca como
-   señal aislada.
-3. **Patrones de vela:** solo se consideran combinados con el contexto de estructura
-   (en qué zona aparecen), nunca como señal por sí solos.
-4. **Presión compradora/vendedora:** volumen por vela como proxy directo; si el
-   volumen de Binance no alcanza, se complementa con funding rate (ver fuentes de
-   datos abajo) como segundo proxy de sesgo comprador/vendedor.
-5. Referencia bibliográfica ya disponible en `resources/12_claves_analisis_tecnico.pdf`
-   (Dow, soporte/resistencia, figuras de precio, Elliott, osciladores, ADX, money
-   management) — se usa como fuente de reglas concretas al implementar cada
-   componente. (`resources/Mercado_analisi.pdf` es un apunte genérico de estudio de
-   mercado/marketing, no aporta a esta parte técnica — se deja archivado sin uso.)
+1. **Market structure:** objective code rules (not "eyeballed") for
+   higher/lower highs and lows, breaks of structure, support/resistance zones.
+2. **Fibonacci:** used as a confluence zone (an interest filter), never as a
+   standalone signal.
+3. **Candlestick patterns:** only considered combined with structural context
+   (where they appear), never as a signal on their own.
+4. **Buying/selling pressure:** per-candle volume as a direct proxy; if
+   Binance volume isn't enough, funding rate (see data sources below) is used
+   as a second proxy for buyer/seller bias.
+5. Reference material already available in
+   `resources/12_claves_analisis_tecnico.pdf` (Dow Theory, support/resistance,
+   price patterns, Elliott, oscillators, ADX, money management) — used as a
+   source of concrete rules when implementing each component.
+   (`resources/Mercado_analisi.pdf` is a generic market-study/marketing
+   textbook excerpt, not relevant to this technical part — archived unused.)
 
-### Fuentes de datos adicionales (todas gratuitas, ya evaluadas)
+### Additional data sources (all free, already evaluated)
 
-- **Funding rate** (Binance Futures, vía `ccxt` — misma librería que ya se usaba
-  para velas): se actualiza cada 8h, disponible como historial completo.
-- **Fear & Greed Index** (`alternative.me`, API gratuita): un valor diario.
-- *Descartado por ahora:* flujos on-chain y sentimiento social granular — requieren
-  servicios pagos (Glassnode/CryptoQuant/Santiment) o un proyecto propio de etiquetado
-  de wallets. Se deja para una eventual etapa posterior si el resto muestra señal.
+- **Funding rate** (Binance Futures, via `ccxt` — the same library already
+  used for candles): updates every 8h, full history available.
+- **Fear & Greed Index** (`alternative.me`, free API): one value per day.
+- *Deferred for now:* on-chain flows and granular social sentiment — these
+  require paid services (Glassnode/CryptoQuant/Santiment) or a home-grown
+  wallet-labeling project. Left for a possible later stage if the rest shows
+  a real edge.
 
-### Herramientas estadísticas (upgrade sobre comparar grupos sueltos)
+### Statistical tools (an upgrade over comparing loose groups)
 
-- **Autocorrelación:** ¿el retorno de hoy predice el de mañana?, a través de varios rezagos.
-- **Regresión:** ajustar retorno futuro = f(retornos pasados, volumen, volatilidad) y
-  medir R² real, en vez de un veredicto binario.
-- **Causalidad de Granger:** ¿el funding rate o el Fear & Greed tienen poder
-  predictivo formal sobre el precio, más allá de simple correlación?
+- **Autocorrelation:** does today's return predict tomorrow's, across several lags at once?
+- **Regression:** fit future return = f(past returns, volume, volatility) and
+  measure real R², instead of a binary verdict.
+- **Granger causality:** does funding rate or the Fear & Greed Index have
+  formal predictive power over price, beyond simple correlation?
 
-Autocorrelación y regresión se pueden aplicar ya con los datos de velas que se van a
-descargar; Granger se aplica una vez que funding rate/Fear & Greed estén integrados.
+Autocorrelation and regression can be applied already with the candle data
+being downloaded; Granger causality applies once funding rate/Fear & Greed are integrated.
 
-### Rigor de backtesting (para no repetir los problemas del intento anterior)
+### Backtesting rigor (to avoid repeating the previous attempt's problems)
 
-- Walk-forward / validación out-of-sample (no ajustar y testear sobre el mismo tramo).
-- Costos de comisión y slippage reales de Binance incluidos en cada simulación.
-- Tamaños de muestra suficientes antes de sacar conclusiones — el reporte anterior
-  tenía escenarios de 18 y 7 operaciones, insuficiente para concluir nada; los nuevos
-  escenarios deben apuntar a un mínimo razonable de operaciones (a definir con datos
-  reales, pero claramente más que decenas).
-- Reporte por escenario × mercado × timeframe × hora/sesión, con las mismas métricas
-  que ya se usaban (win-rate, profit factor, expectancy, max drawdown, retorno total).
+- Walk-forward / out-of-sample validation (never fit and test on the same segment).
+- Real Binance commission and slippage costs included in every simulation.
+- Sufficient sample sizes before drawing conclusions — the previous report had
+  scenarios of 18 and 7 trades, not enough to conclude anything; new scenarios
+  should aim for a reasonable minimum trade count (to be defined with real
+  data, but clearly more than a few dozen).
+- Report broken down by scenario x market x timeframe x hour/session, with the
+  same metrics already used (win rate, profit factor, expectancy, max
+  drawdown, total return).
 
-## Stack técnico
+## Tech stack
 
-- **Lenguaje:** Python.
-- **Datos:** Binance vía API pública (`ccxt`) para velas + funding rate;
-  `alternative.me` para Fear & Greed. Sin credenciales necesarias en esta fase
-  (solo lectura de datos públicos).
-- Sin ejecución de órdenes en esta fase — Fase 1 es 100% lectura y simulación.
+- **Language:** Python.
+- **Data:** Binance public API (`ccxt`) for candles + funding rate;
+  `alternative.me` for Fear & Greed. No credentials needed in this phase
+  (public data reads only).
+- No order execution in this phase — Phase 1 is 100% read-only and simulation.
 
-## Estructura de proyecto propuesta
+## Proposed project structure
 
 ```
 illari/
-├── resources/              # (ya existe) PDFs de referencia + reporte viejo
-├── data/                   # velas/funding/F&G descargados, cacheados en disco
+├── resources/              # (already exists) reference PDFs + old report
+├── data/                   # downloaded candles/funding/F&G, cached on disk
 ├── src/
-│   ├── data/                # fetcher.py (Binance/ccxt), funding.py, fear_greed.py
-│   ├── analysis/             # estructura.py, fibonacci.py, velas.py, volumen.py
-│   ├── stats/                 # autocorrelacion.py, regresion.py, granger.py
-│   ├── backtest/              # motor de simulación, walk-forward, métricas
-│   └── report/                # generación de report.md + gráficos interactivos
-├── config/                  # símbolos, escenarios de fecha, timeframes, sesiones UTC
+│   ├── data/                 # fetcher.py (Binance/ccxt), funding.py, fear_greed.py
+│   ├── analysis/              # structure.py, fibonacci.py, candles.py, volume.py
+│   ├── stats/                  # autocorrelation.py, regression.py, granger.py
+│   ├── backtest/                # simulation engine, walk-forward, metrics
+│   └── report/                  # report.md generation + interactive charts
+├── config/                  # symbols, scenario dates, timeframes, UTC sessions
 ├── tests/
 └── requirements.txt
 ```
 
-Esto es un punto de partida razonable, ajustable durante la implementación real.
+This is a reasonable starting point, adjustable during actual implementation.
 
-## Próximos pasos inmediatos (una vez aprobado este plan)
+## Immediate next steps (once this plan is approved)
 
-1. Crear `requirements.txt` y estructura de carpetas (`src/`, `data/`, `config/`).
-2. Implementar `src/data/fetcher.py` (velas OHLCV multi-timeframe vía `ccxt`/Binance)
-   y validar fechas reales de listado de cada uno de los 5 símbolos.
-3. Implementar `src/analysis/estructura.py` (soportes/resistencias, tendencia) como
-   primer componente objetivo y testeable de forma aislada.
-4. Backtest mínimo end-to-end sobre BTC/USDT en 1 timeframe, para validar el motor
-   completo (datos → señal → simulación → reporte) antes de escalar a 5 mercados ×
-   3 timeframes.
-5. Recién ahí sumar Fibonacci, velas, volumen, funding rate, Fear & Greed, y las
-   herramientas estadísticas.
+1. Create `requirements.txt` and the folder structure (`src/`, `data/`, `config/`).
+2. Implement `src/data/fetcher.py` (multi-timeframe OHLCV candles via
+   `ccxt`/Binance) and validate the real listing date of each of the 5 symbols.
+3. Implement `src/analysis/structure.py` (support/resistance, trend) as the
+   first objective, independently testable component.
+4. Minimal end-to-end backtest on BTC/USDT on 1 timeframe, to validate the
+   full engine (data -> signal -> simulation -> report) before scaling up to
+   5 markets x 3 timeframes.
+5. Only then add Fibonacci, candlesticks, volume, funding rate, Fear & Greed,
+   and the statistical tools.
 
-## Verificación
+## Verification
 
-- Cada módulo de `src/analysis` y `src/stats` con tests unitarios sobre datos
-  sintéticos (casos donde se sabe de antemano cuál debe ser el resultado).
-- El backtest mínimo (paso 4) debe correr de punta a punta y producir un
-  `report.md` con métricas + desglose por hora/sesión, igual que el reporte viejo
-  pero regenerado desde código versionado en este repo.
-- Antes de dar por buena cualquier estrategia: revisar tamaño de muestra y
-  performance out-of-sample, no solo el resultado in-sample.
+- Every module in `src/analysis` and `src/stats` gets unit tests on synthetic
+  data (cases where the expected result is known in advance).
+- The minimal backtest (step 4) must run end-to-end and produce a
+  `report.md` with metrics + hour/session breakdown, just like the old
+  report but regenerated from code version-controlled in this repo.
+- Before accepting any strategy as good: check sample size and out-of-sample
+  performance, not just the in-sample result.
