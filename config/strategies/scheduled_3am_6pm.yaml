@@ -1,0 +1,42 @@
+# Enter every single day at 03:00 UTC, exit at 18:00 UTC (15 hours later,
+# on 1h candles) — no trend, no confirmations, just a fixed daily schedule.
+# `context.required: any` skips the trend gate entirely (dow_trend still
+# runs, its result is just ignored). Same risk mechanics (stop/target) as
+# every other strategy, so this is directly comparable to both
+# trend_pullback_fib.yaml and the random-entry Monte Carlo benchmark — only
+# entry *timing* differs across the three. See docs/PLAN.md and
+# src/strategies/setups/scheduled_entry.py.
+name: scheduled_3am_6pm
+
+engine:
+  lookback_bars: 200
+  swing_order: 3
+
+context:
+  piece: dow_trend
+  required: any
+  params:
+    order: 3
+    lookback_swings: 2
+
+setup:
+  piece: scheduled_entry
+  params:
+    entry_hour: 3
+
+confirmations: []
+
+risk:
+  stop:
+    piece: fixed_pct
+    params:
+      pct_below_reference: 0.5
+  target:
+    piece: risk_reward
+    params:
+      ratio: 2.0
+
+style:
+  max_holding_bars: 15  # 03:00 -> 18:00 on 1h candles
+  fee_pct: 0.1
+  initial_equity: 10000.0

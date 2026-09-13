@@ -23,6 +23,7 @@ from src.strategies.risk.atr_stop import atr_stop
 from src.strategies.risk.fixed_pct import fixed_pct_stop, risk_reward_target
 from src.strategies.setups.breakout import breakout
 from src.strategies.setups.mean_reversion import mean_reversion
+from src.strategies.setups.scheduled_entry import scheduled_entry
 from src.strategies.setups.support_touch import support_touch
 from src.strategies.types import EvalContext, SetupResult
 
@@ -409,3 +410,33 @@ def test_probability_trend_piece_requires_a_table_param():
 
     with pytest.raises(ValueError, match="requires a pre-built 'table' param"):
         probability_trend(ctx, {})
+
+
+def test_scheduled_entry_piece_fires_at_the_configured_hour():
+    df = pd.DataFrame(
+        {
+            "timestamp": [pd.Timestamp("2024-01-01 03:00", tz="UTC")],
+            "open": [100.0],
+            "close": [101.0],
+        }
+    )
+    ctx = EvalContext(price_window=df, marked_window=pd.DataFrame())
+
+    result = scheduled_entry(ctx, {"entry_hour": 3})
+
+    assert result is not None
+    assert result.reference_level == 101.0
+    assert result.extras["scheduled_entry_hour"] == 3
+
+
+def test_scheduled_entry_piece_none_outside_the_configured_hour():
+    df = pd.DataFrame(
+        {
+            "timestamp": [pd.Timestamp("2024-01-01 04:00", tz="UTC")],
+            "open": [100.0],
+            "close": [101.0],
+        }
+    )
+    ctx = EvalContext(price_window=df, marked_window=pd.DataFrame())
+
+    assert scheduled_entry(ctx, {"entry_hour": 3}) is None
