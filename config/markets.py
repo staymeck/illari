@@ -25,7 +25,10 @@ MARKETS: list[Market] = [
 ]
 
 # Multi-context timeframes: fine-grained (entries), intermediate, and global.
-TIMEFRAMES: list[str] = ["5m", "1h", "1d"]
+# 30m added after the initial 5m/1h/1d scale-up showed 5m's noise/fixed-cost
+# mismatch and 1h's better-but-still-thin trade count — it's the middle
+# ground Binance actually offers natively (Binance has no 25m interval).
+TIMEFRAMES: list[str] = ["5m", "30m", "1h", "1d"]
 
 # Market sessions in UTC (start/end hours, end exclusive). Used to label each
 # simulated trade and break down results by session.
