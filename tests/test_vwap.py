@@ -36,7 +36,9 @@ def test_vwap_bias_positive_when_price_above_vwap():
     assert bias > 0
 
 
-def test_vwap_bias_zero_when_not_enough_data():
+def test_vwap_bias_is_nan_when_not_enough_data():
+    # NaN, not 0.0 — 0.0 would be indistinguishable from a genuinely neutral
+    # bias reading (see src/strategies/confirmations/vwap_bias.py).
     df = _df([{"high": 12.0, "low": 8.0, "close": 10.0, "volume": 1.0}])
 
-    assert vwap_bias(df, window=5) == 0.0
+    assert pd.isna(vwap_bias(df, window=5))

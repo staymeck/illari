@@ -8,9 +8,15 @@ import pandas as pd
 from src.analysis.structure import find_swing_points
 from src.strategies.confirmations.candlestick import candlestick
 from src.strategies.confirmations.fibonacci import fibonacci_confluence
+from src.strategies.confirmations.macd_momentum import macd_momentum
+from src.strategies.confirmations.rsi_momentum import rsi_momentum
 from src.strategies.confirmations.volume import volume as volume_confirmation
+from src.strategies.confirmations.vwap_bias import vwap_bias
 from src.strategies.context.dow_trend import dow_trend
+from src.strategies.context.ma_trend import ma_trend
 from src.strategies.risk.fixed_pct import fixed_pct_stop, risk_reward_target
+from src.strategies.setups.breakout import breakout
+from src.strategies.setups.mean_reversion import mean_reversion
 from src.strategies.setups.support_touch import support_touch
 from src.strategies.types import EvalContext, SetupResult
 
@@ -139,3 +145,128 @@ def test_risk_reward_target_matches_expected_formula():
     target = risk_reward_target(entry_price=100.0, stop_price=98.0, ctx=ctx, params={"ratio": 2.0})
 
     assert target == 100.0 + 2.0 * (100.0 - 98.0)
+
+
+def test_ma_trend_piece_delegates_to_ma_cross_trend():
+    df = pd.DataFrame({"close": list(range(1, 101))})  # strong, sustained rally
+    ctx = EvalContext(price_window=df, marked_window=pd.DataFrame())
+
+    trend = ma_trend(ctx, {"fast": 5, "slow": 20, "method": "ema"})
+
+    assert trend == "uptrend"
+
+
+def test_breakout_piece_fires_above_prior_high():
+    highs = [10, 11, 9, 10, 10]
+    df = pd.DataFrame(
+        {
+            "open": highs + [14],
+            "close": highs + [15],
+            "high": highs + [15],
+            "low": highs + [14],
+            "volume": [1.0] * 6,
+        }
+    )
+    ctx = EvalContext(price_window=df, marked_window=pd.DataFrame())
+
+    result = breakout(ctx, {"lookback": 5})
+
+    assert isinstance(result, SetupResult)
+    assert result.reference_level == 11  # highest prior high
+    assert result.extras["breakout_level"] == 11
+
+
+def test_breakout_piece_none_when_not_breaking_out():
+    highs = [10, 11, 9, 10, 10]
+    df = pd.DataFrame(
+        {
+            "open": highs + [10],
+            "close": highs + [10.5],  # doesn't clear the prior high of 11
+            "high": highs + [10.5],
+            "low": highs + [10],
+            "volume": [1.0] * 6,
+        }
+    )
+    ctx = EvalContext(price_window=df, marked_window=pd.DataFrame())
+
+    assert breakout(ctx, {"lookback": 5}) is None
+
+
+def test_mean_reversion_piece_fires_below_lower_band():
+    closes = [10.0] * 9 + [1.0]  # sharp drop below the lower Bollinger Band
+    df = pd.DataFrame({"open": closes, "close": closes, "high": closes, "low": closes, "volume": [1.0] * 10})
+    ctx = EvalContext(price_window=df, marked_window=pd.DataFrame())
+
+    result = mean_reversion(ctx, {"window": 10, "num_std": 1.0})
+
+    assert isinstance(result, SetupResult)
+    assert "bollinger_lower" in result.extras
+
+
+def test_mean_reversion_piece_none_within_the_bands():
+    # Small, ordinary fluctuation that stays inside the bands — not the
+    # degenerate case of a perfectly flat series (std=0 would make the
+    # lower band equal the price itself, trivially "touching" it).
+    closes = [10.0, 10.2, 9.9, 10.1, 10.0, 9.95, 10.05, 10.0, 10.1, 10.05]
+    df = pd.DataFrame({"open": closes, "close": closes, "high": closes, "low": closes, "volume": [1.0] * 10})
+    ctx = EvalContext(price_window=df, marked_window=pd.DataFrame())
+
+    assert mean_reversion(ctx, {"window": 10, "num_std": 2.0}) is None
+
+
+def test_rsi_momentum_confirmation_piece_passes_on_strong_uptrend():
+    df = pd.DataFrame({"close": list(range(1, 30))})
+    ctx = EvalContext(price_window=df, marked_window=pd.DataFrame())
+
+    result = rsi_momentum(ctx, {"period": 14, "min_rsi": 50})
+
+    assert result is not None
+    assert result.extras["rsi"] == 100.0
+
+
+def test_rsi_momentum_confirmation_piece_none_on_downtrend():
+    df = pd.DataFrame({"close": list(range(30, 1, -1))})
+    ctx = EvalContext(price_window=df, marked_window=pd.DataFrame())
+
+    assert rsi_momentum(ctx, {"period": 14, "min_rsi": 50}) is None
+
+
+def test_macd_momentum_confirmation_piece_passes_on_sustained_uptrend():
+    df = pd.DataFrame({"close": list(range(1, 80))})
+    ctx = EvalContext(price_window=df, marked_window=pd.DataFrame())
+
+    result = macd_momentum(ctx, {})
+
+    assert result is not None
+    assert result.extras["macd_histogram"] > 0
+
+
+def test_macd_momentum_confirmation_piece_none_on_flat_series():
+    df = pd.DataFrame({"close": [100.0] * 40})
+    ctx = EvalContext(price_window=df, marked_window=pd.DataFrame())
+
+    assert macd_momentum(ctx, {}) is None
+
+
+def test_vwap_bias_confirmation_piece_passes_above_vwap():
+    df = pd.DataFrame(
+        {
+            "high": [12.0, 22.0],
+            "low": [8.0, 18.0],
+            "close": [10.0, 25.0],
+            "volume": [1.0, 3.0],
+        }
+    )
+    ctx = EvalContext(price_window=df, marked_window=pd.DataFrame())
+
+    result = vwap_bias(ctx, {"window": 2, "min_bias_pct": 0.0})
+
+    assert result is not None
+    assert result.extras["vwap_bias_pct"] > 0
+
+
+def test_vwap_bias_confirmation_piece_none_below_threshold():
+    df = pd.DataFrame({"high": [10.0], "low": [10.0], "close": [10.0], "volume": [1.0]})
+    ctx = EvalContext(price_window=df, marked_window=pd.DataFrame())
+
+    assert vwap_bias(ctx, {"window": 5, "min_bias_pct": 0.0}) is None
