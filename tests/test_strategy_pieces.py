@@ -3,17 +3,22 @@ confirm each piece correctly delegates to the already-tested analysis
 functions it wraps (see tests/test_structure.py, test_fibonacci.py,
 test_candles.py, test_volume.py for the underlying logic), not re-deriving
 that logic here."""
+import numpy as np
 import pandas as pd
+import pytest
 
 from src.analysis.structure import find_swing_points
+from src.strategies.confirmations.adx_strength import adx_strength
 from src.strategies.confirmations.candlestick import candlestick
 from src.strategies.confirmations.fibonacci import fibonacci_confluence
 from src.strategies.confirmations.macd_momentum import macd_momentum
 from src.strategies.confirmations.rsi_momentum import rsi_momentum
+from src.strategies.confirmations.session_filter import session_filter
 from src.strategies.confirmations.volume import volume as volume_confirmation
 from src.strategies.confirmations.vwap_bias import vwap_bias
 from src.strategies.context.dow_trend import dow_trend
 from src.strategies.context.ma_trend import ma_trend
+from src.strategies.risk.atr_stop import atr_stop
 from src.strategies.risk.fixed_pct import fixed_pct_stop, risk_reward_target
 from src.strategies.setups.breakout import breakout
 from src.strategies.setups.mean_reversion import mean_reversion
@@ -270,3 +275,74 @@ def test_vwap_bias_confirmation_piece_none_below_threshold():
     ctx = EvalContext(price_window=df, marked_window=pd.DataFrame())
 
     assert vwap_bias(ctx, {"window": 5, "min_bias_pct": 0.0}) is None
+
+
+def test_atr_stop_piece_below_entry_by_atr_multiple():
+    df = pd.DataFrame(
+        {
+            "high": [102.0] * 20,
+            "low": [100.0] * 20,
+            "close": [101.0] * 20,
+        }
+    )
+    ctx = EvalContext(price_window=df, marked_window=pd.DataFrame())
+    setup = SetupResult(reference_level=100.0)  # unused by this risk piece
+
+    stop = atr_stop(entry_price=110.0, setup=setup, ctx=ctx, params={"period": 14, "multiple": 1.5})
+
+    assert stop == 110.0 - 1.5 * 2.0  # true range settles at high-low=2.0
+
+
+def test_atr_stop_piece_falls_back_when_not_enough_data():
+    df = pd.DataFrame({"high": [102.0, 103.0], "low": [100.0, 101.0], "close": [101.0, 102.0]})
+    ctx = EvalContext(price_window=df, marked_window=pd.DataFrame())
+    setup = SetupResult(reference_level=100.0)
+
+    stop = atr_stop(entry_price=110.0, setup=setup, ctx=ctx, params={"period": 14})
+
+    assert stop == 110.0 * 0.995
+
+
+def test_adx_strength_confirmation_piece_passes_on_strong_trend():
+    values = np.arange(1, 61)
+    df = pd.DataFrame({"high": values + 1, "low": values - 1, "close": values})
+    ctx = EvalContext(price_window=df, marked_window=pd.DataFrame())
+
+    result = adx_strength(ctx, {"period": 14, "min_adx": 25})
+
+    assert result is not None
+    assert result.extras["adx"] > 25
+
+
+def test_adx_strength_confirmation_piece_none_on_choppy_range():
+    n = 60
+    close = 100 + np.sin(np.arange(n))
+    df = pd.DataFrame({"high": close + 1, "low": close - 1, "close": close})
+    ctx = EvalContext(price_window=df, marked_window=pd.DataFrame())
+
+    assert adx_strength(ctx, {"period": 14, "min_adx": 25}) is None
+
+
+def test_session_filter_piece_passes_for_an_allowed_session():
+    df = pd.DataFrame({"timestamp": [pd.Timestamp("2024-01-01 17:00", tz="UTC")]})  # new_york hour (not the overlap)
+    ctx = EvalContext(price_window=df, marked_window=pd.DataFrame())
+
+    result = session_filter(ctx, {"sessions": ["new_york", "london"]})
+
+    assert result is not None
+    assert result.extras["session"] == "new_york"
+
+
+def test_session_filter_piece_none_for_a_disallowed_session():
+    df = pd.DataFrame({"timestamp": [pd.Timestamp("2024-01-01 02:00", tz="UTC")]})  # asia hour
+    ctx = EvalContext(price_window=df, marked_window=pd.DataFrame())
+
+    assert session_filter(ctx, {"sessions": ["new_york", "london"]}) is None
+
+
+def test_session_filter_piece_requires_sessions_param():
+    df = pd.DataFrame({"timestamp": [pd.Timestamp("2024-01-01 02:00", tz="UTC")]})
+    ctx = EvalContext(price_window=df, marked_window=pd.DataFrame())
+
+    with pytest.raises(ValueError, match="requires a non-empty 'sessions' param"):
+        session_filter(ctx, {})
