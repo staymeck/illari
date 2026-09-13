@@ -92,6 +92,81 @@ def _find_entry_signal(ctx: EvalContext, strategy: ResolvedStrategy) -> tuple | 
     return setup, extras
 
 
+def _walk_to_exit(
+    df: pd.DataFrame,
+    entry_idx: int,
+    stop_price: float,
+    target_price: float,
+    stop_trigger: str,
+    max_holding_bars: int,
+) -> tuple[int, float, str, bool | None]:
+    """Scans forward from `entry_idx` for a stop/target/timeout exit — the
+    same walk used by both `run_backtest` and
+    `src.backtest.random_benchmark` (which differs only in how it picks
+    *when* to enter, not in how a position is managed once open). Returns
+    `(exit_idx, exit_price, exit_reason, stop_was_premature)`."""
+    n = len(df)
+    last_possible = min(entry_idx + max_holding_bars, n - 1)
+    for j in range(entry_idx, last_possible + 1):
+        bar = df.iloc[j]
+        stop_hit = bar["close"] <= stop_price if stop_trigger == "close" else bar["low"] <= stop_price
+        if stop_hit:
+            exit_price = bar["close"] if stop_trigger == "close" else stop_price
+            # Diagnostic (per Kaufman, Trading Systems and Methods, ch. 23:
+            # stops are "a duel with price noise" — a stop can capture the
+            # worst of a move that reverses right after): would the target
+            # still have been reached later, had this stop not fired?
+            stop_was_premature = bool((df["high"].iloc[j + 1 : last_possible + 1] >= target_price).any())
+            return j, exit_price, "stop", stop_was_premature
+        if bar["high"] >= target_price:
+            return j, target_price, "target", None
+    exit_idx = last_possible
+    return exit_idx, df["close"].iloc[exit_idx], "timeout", None
+
+
+def _build_trade_record(
+    df: pd.DataFrame,
+    entry_idx: int,
+    exit_idx: int,
+    entry_price: float,
+    exit_price: float,
+    exit_reason: str,
+    stop_was_premature: bool | None,
+    stop_price: float,
+    target_price: float,
+    fee_pct: float,
+    equity_before: float,
+    extras: dict,
+) -> tuple[dict, float]:
+    """Builds the trade dict (with fee-adjusted PnL, hour/session labels,
+    and any piece extras merged in) and the resulting equity — shared by
+    `run_backtest` and `random_benchmark.run_random_trial`. Returns
+    `(trade_dict, new_equity)`."""
+    gross_pnl_pct = (exit_price - entry_price) / entry_price * 100
+    net_pnl_pct = gross_pnl_pct - 2 * fee_pct  # entry + exit fees
+    equity = equity_before * (1 + net_pnl_pct / 100)
+    pnl_abs = equity - equity_before
+
+    entry_ts = df["timestamp"].iloc[entry_idx]
+    trade = {
+        "entry_time": entry_ts,
+        "exit_time": df["timestamp"].iloc[exit_idx],
+        "hour_utc": entry_ts.hour,
+        "session": session_for_hour(entry_ts.hour),
+        "entry_price": entry_price,
+        "stop_price": stop_price,
+        "target_price": target_price,
+        "exit_price": exit_price,
+        "exit_reason": exit_reason,
+        "stop_was_premature": stop_was_premature,
+        "pnl_pct": net_pnl_pct,
+        "pnl_abs": pnl_abs,
+        "equity_after": equity,
+    }
+    trade.update(extras)
+    return trade, equity
+
+
 def run_backtest(df: pd.DataFrame, strategy: ResolvedStrategy) -> tuple[pd.DataFrame, pd.Series]:
     """Simulates `strategy` over `df` (columns: timestamp, open, high, low,
     close, volume) and returns (trades, equity_curve)."""
@@ -135,56 +210,14 @@ def run_backtest(df: pd.DataFrame, strategy: ResolvedStrategy) -> tuple[pd.DataF
             continue
         target_price = strategy.target_fn(entry_price, stop_price, ctx, strategy.target_params)
 
-        exit_idx = None
-        exit_price = None
-        exit_reason = "timeout"
-        stop_was_premature = None
-        last_possible = min(entry_idx + strategy.max_holding_bars, n - 1)
-        for j in range(entry_idx, last_possible + 1):
-            bar = df.iloc[j]
-            stop_hit = bar["close"] <= stop_price if strategy.stop_trigger == "close" else bar["low"] <= stop_price
-            if stop_hit:
-                exit_idx = j
-                exit_price = bar["close"] if strategy.stop_trigger == "close" else stop_price
-                exit_reason = "stop"
-                # Diagnostic (per Kaufman, Trading Systems and Methods, ch. 23:
-                # stops are "a duel with price noise" — a stop can capture the
-                # worst of a move that reverses right after): would the target
-                # still have been reached later, had this stop not fired?
-                stop_was_premature = bool(
-                    (df["high"].iloc[j + 1 : last_possible + 1] >= target_price).any()
-                )
-                break
-            if bar["high"] >= target_price:
-                exit_idx, exit_price, exit_reason = j, target_price, "target"
-                break
-        if exit_idx is None:
-            exit_idx = last_possible
-            exit_price = df["close"].iloc[exit_idx]
+        exit_idx, exit_price, exit_reason, stop_was_premature = _walk_to_exit(
+            df, entry_idx, stop_price, target_price, strategy.stop_trigger, strategy.max_holding_bars
+        )
 
-        gross_pnl_pct = (exit_price - entry_price) / entry_price * 100
-        net_pnl_pct = gross_pnl_pct - 2 * strategy.fee_pct  # entry + exit fees
-        trade_equity_before = equity
-        equity *= 1 + net_pnl_pct / 100
-        pnl_abs = equity - trade_equity_before
-
-        entry_ts = df["timestamp"].iloc[entry_idx]
-        trade = {
-            "entry_time": entry_ts,
-            "exit_time": df["timestamp"].iloc[exit_idx],
-            "hour_utc": entry_ts.hour,
-            "session": session_for_hour(entry_ts.hour),
-            "entry_price": entry_price,
-            "stop_price": stop_price,
-            "target_price": target_price,
-            "exit_price": exit_price,
-            "exit_reason": exit_reason,
-            "stop_was_premature": stop_was_premature,
-            "pnl_pct": net_pnl_pct,
-            "pnl_abs": pnl_abs,
-            "equity_after": equity,
-        }
-        trade.update(extras)
+        trade, equity = _build_trade_record(
+            df, entry_idx, exit_idx, entry_price, exit_price, exit_reason, stop_was_premature,
+            stop_price, target_price, strategy.fee_pct, equity, extras,
+        )
         trades.append(trade)
         equity_curve.append(equity)
 
