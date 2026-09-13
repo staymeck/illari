@@ -1,0 +1,46 @@
+# The base for the "one filter at a time" comparison: dow_trend +
+# support_touch + higher_tf_trend ONLY — none of Fibonacci/candlestick/
+# volume/ADX/session. This is what "chained" trend_pullback_htf_adx
+# starved down to 0-13 trades over ~6 years; stripping back to just the
+# multi-timeframe confirmation should recover a much larger sample. See
+# docs/PLAN.md / Bitácora Illari. Needs the caller to pass higher_tf_df.
+name: trend_pullback_htf_minimal
+
+engine:
+  lookback_bars: 200
+  swing_order: 3
+
+context:
+  piece: dow_trend
+  required: uptrend
+  params:
+    order: 3
+    lookback_swings: 2
+
+setup:
+  piece: support_touch
+  params:
+    order: 3
+    tolerance_pct: 1.0
+
+confirmations:
+  - piece: higher_tf_trend
+    params:
+      required: uptrend
+      order: 3
+      lookback_swings: 2
+
+risk:
+  stop:
+    piece: fixed_pct
+    params:
+      pct_below_reference: 0.5
+  target:
+    piece: risk_reward
+    params:
+      ratio: 2.0
+
+style:
+  max_holding_bars: 24
+  fee_pct: 0.1
+  initial_equity: 10000.0
