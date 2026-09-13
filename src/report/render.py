@@ -67,9 +67,13 @@ def render_run_markdown(
     trades: pd.DataFrame,
     metrics: dict,
     scenario: str = "default",
+    chart_path: Path | None = None,
 ) -> str:
     """Builds the markdown text for one backtest run. Same metric format as
-    resources/report.md (the report from the previous session)."""
+    resources/report.md (the report from the previous session). `chart_path`
+    (optional), if given, links the interactive entries chart from
+    src.report.chart — pass the path relative to this report's own file
+    (both live under the same reports/ directory by convention)."""
     lines = [
         "# Backtest report — Trading lab",
         "",
@@ -94,6 +98,9 @@ def render_run_markdown(
         f"- Final equity: **{metrics['final_equity']}**",
         "",
     ]
+
+    if chart_path is not None:
+        lines += [f"[View interactive entries chart]({chart_path.name})", ""]
 
     if not trades.empty:
         lines += ["## Breakdown by exit reason", ""]
@@ -120,11 +127,12 @@ def write_run_report(
     metrics: dict,
     scenario: str = "default",
     reports_dir: Path = REPORTS_DIR,
+    chart_path: Path | None = None,
 ) -> Path:
     """Renders and saves a single run's report under `reports_dir`, following
     the standard naming from src/report/paths.py. Returns the path written."""
     out_path = run_report_path(symbol, timeframe, scenario, reports_dir=reports_dir)
-    markdown = render_run_markdown(symbol, timeframe, trades, metrics, scenario=scenario)
+    markdown = render_run_markdown(symbol, timeframe, trades, metrics, scenario=scenario, chart_path=chart_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(markdown, encoding="utf-8")
     return out_path

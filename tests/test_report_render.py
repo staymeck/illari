@@ -1,4 +1,6 @@
 """Tests for src/report/render.py."""
+from pathlib import Path
+
 import pandas as pd
 
 from src.report.render import _stop_noise_lines, render_run_markdown, write_run_report
@@ -40,6 +42,20 @@ def test_render_run_markdown_includes_market_and_metrics():
     assert "Breakdown by confirming candlestick pattern" in markdown
     assert "Stop-loss noise diagnostic" in markdown
     assert "1 (100.0%)" in markdown  # the one stop-out was premature
+
+
+def test_render_run_markdown_links_chart_when_given():
+    markdown = render_run_markdown(
+        "BTC/USDT", "1h", _trades(), _METRICS, chart_path=Path("/anywhere/btc-usdt_1h_entries_chart.html")
+    )
+
+    assert "btc-usdt_1h_entries_chart.html" in markdown
+
+
+def test_render_run_markdown_no_chart_link_by_default():
+    markdown = render_run_markdown("BTC/USDT", "1h", _trades(), _METRICS)
+
+    assert "entries_chart" not in markdown
 
 
 def test_render_run_markdown_handles_no_trades():
