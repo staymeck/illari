@@ -2,18 +2,27 @@
 -> simulation -> metrics) before scaling up to 5 markets x 3 timeframes with
 every component of the analysis engine.
 
-Strategy used for this validation (deliberately simple, market structure only
-— no Fibonacci/candlesticks/volume yet, see docs/PLAN.md "Immediate next
-steps"): buy near a confirmed support level while the (Dow) trend is an
-uptrend, with a stop below support and a target at a multiple R of the risk.
+Strategy used for this validation (see docs/PLAN.md "Technical analysis engine
+components" — structure and Fibonacci as *confluence* filters, never
+standalone signals, and candlestick patterns only combined with context):
+buy when all of the following line up on the same candle —
 
-A note on look-ahead bias: at every step `t`, `structure.py` is only given a
-fixed-size trailing window `df.iloc[t + 1 - lookback_bars : t + 1]` (nothing
-from the future, and never a growing window). Pivots from `find_swing_points`
-use a centered rolling window, so the last `order` bars of any slice are
-automatically left unconfirmed (NaN -> False) until enough "future" bars exist
-within the slice itself — i.e. the function is already look-ahead safe as long
-as it's only fed data up to `t`.
+1. The (Dow) trend is an uptrend.
+2. Price is touching a confirmed support level.
+3. Price also sits near a Fibonacci retracement level of the latest up-leg
+   (independent confluence check, per docs/PLAN.md).
+4. The candle itself shows a bullish reversal pattern (hammer / bullish
+   engulfing) — this is the "context" that makes the pattern meaningful.
+
+Stop goes below the support level, target is a multiple R of the risk.
+
+A note on look-ahead bias: at every step `t`, the analysis functions are only
+given a fixed-size trailing window `df.iloc[t + 1 - lookback_bars : t + 1]`
+(nothing from the future, and never a growing window). Pivots from
+`find_swing_points` use a centered rolling window, so the last `order` bars of
+any slice are automatically left unconfirmed (NaN -> False) until enough
+"future" bars exist within the slice itself — i.e. the function is already
+look-ahead safe as long as it's only fed data up to `t`.
 """
 from __future__ import annotations
 
@@ -22,6 +31,8 @@ from dataclasses import dataclass
 import pandas as pd
 
 from config.markets import session_for_hour
+from src.analysis.candles import bullish_reversal_pattern
+from src.analysis.fibonacci import is_near_confluence, latest_up_leg
 from src.analysis.structure import classify_trend, support_resistance_levels
 
 
@@ -30,6 +41,8 @@ class BacktestConfig:
     lookback_bars: int = 200          # trailing window used to compute structure
     swing_order: int = 3              # see structure.find_swing_points
     support_tolerance_pct: float = 1.0  # how close to support counts as a touch
+    fib_tolerance_pct: float = 1.0    # how close to a Fibonacci level counts as confluence
+    require_candle_confirmation: bool = True  # require a bullish reversal candle to confirm
     stop_pct_below_support: float = 0.5  # stop = support * (1 - this%)
     reward_risk_ratio: float = 2.0    # target = entry + R * risk
     max_holding_bars: int = 24        # force-close if stop/target isn't hit before this
@@ -37,9 +50,17 @@ class BacktestConfig:
     initial_equity: float = 10_000.0
 
 
-def _find_entry_signal(history: pd.DataFrame, cfg: BacktestConfig) -> float | None:
-    """Returns the support level that triggers an entry, or None if there's no
-    signal, evaluating only with data up to the last row of `history` (no future)."""
+@dataclass(frozen=True)
+class EntrySignal:
+    support_level: float
+    fib_ratio: float
+    fib_level: float
+    pattern: str | None
+
+
+def _find_entry_signal(history: pd.DataFrame, cfg: BacktestConfig) -> EntrySignal | None:
+    """Returns the confluence signal that triggers an entry, or None if there's
+    no signal, evaluating only with data up to the last row of `history` (no future)."""
     if len(history) < cfg.lookback_bars:
         return None
 
@@ -53,11 +74,28 @@ def _find_entry_signal(history: pd.DataFrame, cfg: BacktestConfig) -> float | No
         return None
 
     last_close = history["close"].iloc[-1]
+    matched_support = None
     for level in supports:
         distance_pct = abs(last_close - level) / level * 100
         if last_close >= level and distance_pct <= cfg.support_tolerance_pct:
-            return level
-    return None
+            matched_support = level
+            break
+    if matched_support is None:
+        return None
+
+    leg = latest_up_leg(history, order=cfg.swing_order)
+    if leg is None:
+        return None
+    confluence = is_near_confluence(last_close, leg["low"], leg["high"], cfg.fib_tolerance_pct)
+    if confluence is None:
+        return None
+    fib_ratio, fib_level = confluence
+
+    pattern = bullish_reversal_pattern(history, idx=len(history) - 1)
+    if cfg.require_candle_confirmation and pattern is None:
+        return None
+
+    return EntrySignal(support_level=matched_support, fib_ratio=fib_ratio, fib_level=fib_level, pattern=pattern)
 
 
 def run_backtest(df: pd.DataFrame, cfg: BacktestConfig | None = None) -> tuple[pd.DataFrame, pd.Series]:
@@ -75,9 +113,9 @@ def run_backtest(df: pd.DataFrame, cfg: BacktestConfig | None = None) -> tuple[p
     while i < n - 1:
         window_start = max(0, i + 1 - cfg.lookback_bars)
         history = df.iloc[window_start : i + 1]
-        support = _find_entry_signal(history, cfg)
+        signal = _find_entry_signal(history, cfg)
 
-        if support is None:
+        if signal is None:
             equity_curve.append(equity)
             i += 1
             continue
@@ -86,7 +124,7 @@ def run_backtest(df: pd.DataFrame, cfg: BacktestConfig | None = None) -> tuple[p
         if entry_idx >= n:
             break
         entry_price = df["open"].iloc[entry_idx]
-        stop_price = support * (1 - cfg.stop_pct_below_support / 100)
+        stop_price = signal.support_level * (1 - cfg.stop_pct_below_support / 100)
         risk = entry_price - stop_price
         if risk <= 0:
             equity_curve.append(equity)
@@ -126,6 +164,8 @@ def run_backtest(df: pd.DataFrame, cfg: BacktestConfig | None = None) -> tuple[p
                 "entry_price": entry_price,
                 "exit_price": exit_price,
                 "exit_reason": exit_reason,
+                "fib_ratio": signal.fib_ratio,
+                "pattern": signal.pattern,
                 "pnl_pct": net_pnl_pct,
                 "pnl_abs": pnl_abs,
                 "equity_after": equity,

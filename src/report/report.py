@@ -38,11 +38,12 @@ def render_report(
         "",
         f"Market: **{symbol}** · Timeframe: **{timeframe}**",
         "",
-        "> End-to-end validation run of the engine (market structure only,",
-        "> no Fibonacci/candlesticks/volume yet — see docs/PLAN.md). Do not",
-        "> treat these numbers as evidence of a profitable strategy: this is",
-        "> missing walk-forward validation, out-of-sample testing, and a much",
-        "> larger trade sample.",
+        "> End-to-end validation run of the engine (structure + Fibonacci",
+        "> confluence + candlestick confirmation; volume/funding rate/Fear &",
+        "> Greed not integrated yet — see docs/PLAN.md). Do not treat these",
+        "> numbers as evidence of a profitable strategy: this is missing",
+        "> walk-forward validation, out-of-sample testing, and a much larger",
+        "> trade sample.",
         "",
         "## Overall metrics",
         "",
@@ -61,6 +62,9 @@ def render_report(
         lines.append(_breakdown_by(trades, "hour_utc").to_markdown(index=False))
         lines += ["", "## Breakdown by market session", ""]
         lines.append(_breakdown_by(trades, "session").to_markdown(index=False))
+        if "pattern" in trades.columns:
+            lines += ["", "## Breakdown by confirming candlestick pattern", ""]
+            lines.append(_breakdown_by(trades, "pattern").to_markdown(index=False))
         lines.append("")
     else:
         lines.append("_No trades were generated in the simulated range._")
