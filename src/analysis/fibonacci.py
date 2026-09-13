@@ -48,10 +48,19 @@ def latest_up_leg(df: pd.DataFrame, order: int = 3, marked: pd.DataFrame | None 
         return None
     low_idx = candidate_lows.index[-1]
 
+    low_price = float(marked.loc[low_idx, "low"])
+    high_price = float(marked.loc[last_high_idx, "high"])
+    if low_price >= high_price:
+        # The low happened chronologically before the high, but isn't
+        # actually lower — e.g. a small bounce inside an overall downtrend,
+        # where both pivots are just local extrema. That's not a genuine
+        # up-leg, so there's nothing valid to retrace against right now.
+        return None
+
     return {
-        "low": float(marked.loc[low_idx, "low"]),
+        "low": low_price,
         "low_idx": int(low_idx),
-        "high": float(marked.loc[last_high_idx, "high"]),
+        "high": high_price,
         "high_idx": int(last_high_idx),
     }
 

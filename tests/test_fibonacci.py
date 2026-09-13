@@ -84,3 +84,27 @@ def test_latest_up_leg_returns_none_when_last_pivot_is_a_low():
     leg = latest_up_leg(df, order=2)
 
     assert leg is None
+
+
+def test_latest_up_leg_returns_none_when_low_precedes_high_but_is_not_lower():
+    # Regression test: found during the 5-market x 36-month scale-up run.
+    # A swing low can chronologically precede a swing high while still
+    # sitting ABOVE that high's price — e.g. within a trimmed lookback
+    # window during an overall downtrend, the most recent *confirmed* low
+    # can be numerically higher than the most recent *confirmed* high. That
+    # is not a genuine up-leg, and must not be treated as one (it used to
+    # reach retracement_levels() with swing_high < swing_low and raise
+    # ValueError). Built directly as a `marked` frame to target this exact
+    # code path regardless of how the underlying pivots were produced.
+    marked = pd.DataFrame(
+        {
+            "high": [100, 80, 70, 60],
+            "low": [100, 80, 70, 60],
+            "is_swing_low": [False, True, False, False],  # idx1, price 80
+            "is_swing_high": [False, False, False, True],  # idx3, price 60 — lower, but later
+        }
+    )
+
+    leg = latest_up_leg(pd.DataFrame(), order=2, marked=marked)
+
+    assert leg is None
