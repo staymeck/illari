@@ -1,0 +1,61 @@
+# trend_pullback_htf.yaml + a session/hour filter — combines the two most
+# promising leads found this session: the 1d trend confirmation (Kaufman
+# ch. 19) and the "hora de entrada al mercado" idea from the very start of
+# docs/PLAN.md. Same sessions used in session_filtered_pullback.yaml
+# (London/New York/overlap), for a like-for-like comparison against
+# trend_pullback_htf.yaml (no hour filter) and trend_pullback_fib.yaml
+# (no htf, no hour filter). Needs the caller to pass higher_tf_df, same as
+# trend_pullback_htf.yaml.
+name: trend_pullback_htf_session
+
+engine:
+  lookback_bars: 200
+  swing_order: 3
+
+context:
+  piece: dow_trend
+  required: uptrend
+  params:
+    order: 3
+    lookback_swings: 2
+
+setup:
+  piece: support_touch
+  params:
+    order: 3
+    tolerance_pct: 1.0
+
+confirmations:
+  - piece: higher_tf_trend
+    params:
+      required: uptrend
+      order: 3
+      lookback_swings: 2
+  - piece: session_filter
+    params:
+      sessions: [london, new_york, overlap_london_ny]
+  - piece: fibonacci
+    params:
+      order: 3
+      tolerance_pct: 1.0
+  - piece: candlestick
+  - piece: volume
+    params:
+      window: 20
+      spike_threshold: 1.2
+      min_bias: 0.1
+
+risk:
+  stop:
+    piece: fixed_pct
+    params:
+      pct_below_reference: 0.5
+  target:
+    piece: risk_reward
+    params:
+      ratio: 2.0
+
+style:
+  max_holding_bars: 24
+  fee_pct: 0.1
+  initial_equity: 10000.0

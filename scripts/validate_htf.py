@@ -1,7 +1,11 @@
-"""Full validation of the multi-timeframe confirmation (trend_pullback_htf.yaml
-vs trend_pullback_fib.yaml): cross-market comparison on 1h across all 5
-markets, then walk-forward (3 folds) on whichever markets look promising —
-same discipline already applied to the ADX/ATR combos. See docs/PLAN.md.
+"""Full validation of the multi-timeframe confirmation, plus the combined
+htf+session variant: cross-market comparison on 1h across all 5 markets,
+then walk-forward (3 folds) on BTC/USDT — same discipline already applied
+to the ADX/ATR combos. See docs/PLAN.md.
+
+`higher_tf_df` is passed to every strategy's run_backtest call — strategies
+that don't use the higher_tf_trend confirmation simply ignore it, so one
+script covers strategies with and without it.
 
 Usage:
     .venv/bin/python scripts/validate_htf.py
@@ -25,61 +29,56 @@ SINCE = "2023-09-13"
 UNTIL = "2026-09-13"
 N_FOLDS = 3
 
-
-def _run_pair(df, higher_tf_df, baseline_strategy, htf_strategy):
-    baseline_trades, baseline_equity = run_backtest(df, baseline_strategy)
-    baseline_metrics = compute_metrics(baseline_trades, baseline_equity, baseline_strategy.initial_equity)
-
-    htf_trades, htf_equity = run_backtest(df, htf_strategy, higher_tf_df=higher_tf_df)
-    htf_metrics = compute_metrics(htf_trades, htf_equity, htf_strategy.initial_equity)
-    return baseline_metrics, htf_metrics
+STRATEGY_PATHS = [
+    "config/strategies/trend_pullback_fib.yaml",
+    "config/strategies/trend_pullback_htf.yaml",
+    "config/strategies/trend_pullback_htf_session.yaml",
+]
 
 
-def cross_market_check() -> None:
+def _run_all(df, higher_tf_df, strategies) -> list[dict]:
+    results = []
+    for strategy in strategies:
+        trades, equity = run_backtest(df, strategy, higher_tf_df=higher_tf_df)
+        results.append(compute_metrics(trades, equity, strategy.initial_equity))
+    return results
+
+
+def cross_market_check(strategies) -> None:
     print(f"=== Cross-market check, {TIMEFRAME} ({SINCE} -> {UNTIL}) ===\n")
-    print(f"{'market':<10} {'baseline_n':>10} {'baseline_ret':>12} {'htf_n':>6} {'htf_ret':>9}")
-
-    baseline_strategy = load_strategy("config/strategies/trend_pullback_fib.yaml")
-    htf_strategy = load_strategy("config/strategies/trend_pullback_htf.yaml")
+    header = "".join(f"{s.name:>26}" for s in strategies)
+    print(f"{'market':<10}{header}")
 
     for market in MARKETS:
         df = fetch_ohlcv(market.symbol, TIMEFRAME, since=SINCE, until=UNTIL)
         higher_tf_df = fetch_ohlcv(market.symbol, HIGHER_TIMEFRAME, since=SINCE, until=UNTIL)
-        baseline_metrics, htf_metrics = _run_pair(df, higher_tf_df, baseline_strategy, htf_strategy)
-        print(
-            f"{market.symbol:<10} {baseline_metrics['n_trades']:>10} "
-            f"{baseline_metrics['total_return_pct']:>11}% {htf_metrics['n_trades']:>6} "
-            f"{htf_metrics['total_return_pct']:>8}%"
-        )
+        results = _run_all(df, higher_tf_df, strategies)
+        row = "".join(f"{m['n_trades']:>4} / {m['total_return_pct']:>7}%   " for m in results)
+        print(f"{market.symbol:<10}{row}")
 
 
-def walk_forward_check(symbol: str) -> None:
+def walk_forward_check(symbol: str, strategies) -> None:
     print(f"\n=== Walk-forward, {symbol} {TIMEFRAME}, {N_FOLDS} folds ===\n")
-    baseline_strategy = load_strategy("config/strategies/trend_pullback_fib.yaml")
-    htf_strategy = load_strategy("config/strategies/trend_pullback_htf.yaml")
+    positive_counts = [0] * len(strategies)
 
-    baseline_positive = 0
-    htf_positive = 0
     for fold in chronological_folds(SINCE, UNTIL, N_FOLDS):
         df = fetch_ohlcv(symbol, TIMEFRAME, since=fold.since, until=fold.until)
         higher_tf_df = fetch_ohlcv(symbol, HIGHER_TIMEFRAME, since=fold.since, until=fold.until)
-        baseline_metrics, htf_metrics = _run_pair(df, higher_tf_df, baseline_strategy, htf_strategy)
+        results = _run_all(df, higher_tf_df, strategies)
 
-        if baseline_metrics["total_return_pct"] > 0:
-            baseline_positive += 1
-        if htf_metrics["total_return_pct"] > 0:
-            htf_positive += 1
+        for k, m in enumerate(results):
+            if m["total_return_pct"] > 0:
+                positive_counts[k] += 1
 
-        print(
-            f"  {fold.since} -> {fold.until}: baseline {baseline_metrics['n_trades']:>3} trades / "
-            f"{baseline_metrics['total_return_pct']:>7}%   |   htf {htf_metrics['n_trades']:>3} trades / "
-            f"{htf_metrics['total_return_pct']:>7}%"
-        )
+        row = "   |   ".join(f"{s.name}: {m['n_trades']:>3} trades / {m['total_return_pct']:>7}%" for s, m in zip(strategies, results))
+        print(f"  {fold.since} -> {fold.until}: {row}")
 
-    print(f"\n  baseline: {baseline_positive}/{N_FOLDS} folds positive")
-    print(f"  htf:      {htf_positive}/{N_FOLDS} folds positive")
+    print()
+    for s, count in zip(strategies, positive_counts):
+        print(f"  {s.name}: {count}/{N_FOLDS} folds positive")
 
 
 if __name__ == "__main__":
-    cross_market_check()
-    walk_forward_check("BTC/USDT")
+    strategies = [load_strategy(p) for p in STRATEGY_PATHS]
+    cross_market_check(strategies)
+    walk_forward_check("BTC/USDT", strategies)
