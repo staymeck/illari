@@ -13,6 +13,9 @@ buy when all of the following line up on the same candle —
    (independent confluence check, per docs/PLAN.md).
 4. The candle itself shows a bullish reversal pattern (hammer / bullish
    engulfing) — this is the "context" that makes the pattern meaningful.
+5. Volume confirms real buyer participation (above-average volume on a
+   buyer-dominant trailing window) — without this, items 1-4 could just be
+   a low-liquidity wiggle with no real interest behind it.
 
 Stop goes below the support level, target is a multiple R of the risk.
 
@@ -34,6 +37,7 @@ from config.markets import session_for_hour
 from src.analysis.candles import bullish_reversal_pattern
 from src.analysis.fibonacci import is_near_confluence, latest_up_leg
 from src.analysis.structure import classify_trend, support_resistance_levels
+from src.analysis.volume import confirms_buyer_pressure, directional_volume_bias
 
 
 @dataclass(frozen=True)
@@ -43,6 +47,10 @@ class BacktestConfig:
     support_tolerance_pct: float = 1.0  # how close to support counts as a touch
     fib_tolerance_pct: float = 1.0    # how close to a Fibonacci level counts as confluence
     require_candle_confirmation: bool = True  # require a bullish reversal candle to confirm
+    require_volume_confirmation: bool = True  # require buyer-dominant, above-average volume
+    volume_window: int = 20
+    volume_spike_threshold: float = 1.2
+    volume_min_bias: float = 0.1
     stop_pct_below_support: float = 0.5  # stop = support * (1 - this%)
     reward_risk_ratio: float = 2.0    # target = entry + R * risk
     max_holding_bars: int = 24        # force-close if stop/target isn't hit before this
@@ -56,6 +64,7 @@ class EntrySignal:
     fib_ratio: float
     fib_level: float
     pattern: str | None
+    volume_bias: float
 
 
 def _find_entry_signal(history: pd.DataFrame, cfg: BacktestConfig) -> EntrySignal | None:
@@ -95,7 +104,24 @@ def _find_entry_signal(history: pd.DataFrame, cfg: BacktestConfig) -> EntrySigna
     if cfg.require_candle_confirmation and pattern is None:
         return None
 
-    return EntrySignal(support_level=matched_support, fib_ratio=fib_ratio, fib_level=fib_level, pattern=pattern)
+    last_idx = len(history) - 1
+    if cfg.require_volume_confirmation and not confirms_buyer_pressure(
+        history,
+        idx=last_idx,
+        window=cfg.volume_window,
+        spike_threshold=cfg.volume_spike_threshold,
+        min_bias=cfg.volume_min_bias,
+    ):
+        return None
+    volume_bias = directional_volume_bias(history, window=cfg.volume_window)
+
+    return EntrySignal(
+        support_level=matched_support,
+        fib_ratio=fib_ratio,
+        fib_level=fib_level,
+        pattern=pattern,
+        volume_bias=volume_bias,
+    )
 
 
 def run_backtest(df: pd.DataFrame, cfg: BacktestConfig | None = None) -> tuple[pd.DataFrame, pd.Series]:
@@ -166,6 +192,7 @@ def run_backtest(df: pd.DataFrame, cfg: BacktestConfig | None = None) -> tuple[p
                 "exit_reason": exit_reason,
                 "fib_ratio": signal.fib_ratio,
                 "pattern": signal.pattern,
+                "volume_bias": signal.volume_bias,
                 "pnl_pct": net_pnl_pct,
                 "pnl_abs": pnl_abs,
                 "equity_after": equity,
