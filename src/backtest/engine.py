@@ -57,6 +57,8 @@ behavior to every run before it existed.
 """
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 import pandas as pd
 
 from config.markets import session_for_hour
@@ -98,6 +100,65 @@ def _find_entry_signal(ctx: EvalContext, strategy: ResolvedStrategy) -> tuple | 
         extras.update(result.extras)
 
     return setup, extras
+
+
+@dataclass(frozen=True)
+class SignalEvaluation:
+    """The result of checking a strategy's entry condition on the single
+    most recent bar of a (small, recent) OHLCV window — no simulation loop,
+    no trades, no execution. This is what a live "market snapshot" needs
+    (see docs/PLAN.md, Phase 2): "does the strategy's entry condition hold
+    right now?", using only a rolling window of recent candles — the same
+    `lookback_bars` a live system would keep — instead of a full historical
+    backtest."""
+
+    as_of: pd.Timestamp
+    trend: str
+    signal: bool
+    reference_level: float | None
+    extras: dict
+
+
+def evaluate_signal(
+    df: pd.DataFrame,
+    strategy: ResolvedStrategy,
+    higher_tf_df: pd.DataFrame | None = None,
+    higher_tf_lookback_bars: int = 50,
+) -> SignalEvaluation:
+    """Evaluates `strategy`'s context -> setup -> confirmations chain on the
+    LAST bar of `df` only. `df` only needs to cover `strategy.lookback_bars`
+    (+ a small buffer for swing confirmation) — not a multi-year history —
+    matching how little data this actually requires in practice (see
+    docs/PLAN.md's discussion of how far back a live system needs to look).
+    Raises ValueError if `df` is too short to evaluate at all.
+    """
+    df = df.reset_index(drop=True)
+    i = len(df) - 1
+    if i < strategy.lookback_bars:
+        raise ValueError(f"evaluate_signal needs at least {strategy.lookback_bars} bars, got {i + 1}")
+
+    window_start = max(0, i + 1 - strategy.lookback_bars)
+    price_window = df.iloc[window_start : i + 1]
+    marked_full = find_swing_points(df, order=strategy.swing_order)
+    marked_window = _confirmed_pivots_as_of(marked_full, i, window_start, strategy.swing_order)
+
+    higher_tf_window = None
+    if higher_tf_df is not None:
+        higher_tf_df = higher_tf_df.reset_index(drop=True)
+        interval = higher_tf_df["timestamp"].diff().median()
+        higher_tf_window = _higher_tf_window_as_of(
+            higher_tf_df, df["timestamp"].iloc[i], higher_tf_lookback_bars, interval
+        )
+
+    ctx = EvalContext(price_window=price_window, marked_window=marked_window, higher_tf_window=higher_tf_window)
+    trend = strategy.context_fn(ctx, strategy.context_params)
+    signal = _find_entry_signal(ctx, strategy)
+
+    as_of = df["timestamp"].iloc[i]
+    if signal is None:
+        return SignalEvaluation(as_of=as_of, trend=trend, signal=False, reference_level=None, extras={})
+    setup, extras = signal
+    return SignalEvaluation(as_of=as_of, trend=trend, signal=True, reference_level=setup.reference_level, extras=extras)
 
 
 def _walk_to_exit(
