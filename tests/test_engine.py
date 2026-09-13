@@ -1,11 +1,11 @@
-"""Tests sobre datos sintéticos para src/backtest/engine.py."""
+"""Tests on synthetic data for src/backtest/engine.py."""
 import pandas as pd
 
 from src.backtest.engine import compute_metrics
 
 
 def test_compute_metrics_known_trades():
-    # 2 ganadoras (+100 c/u) y 1 perdedora (-50): resultado conocido a mano.
+    # 2 winners (+100 each) and 1 loser (-50): result known by hand.
     trades = pd.DataFrame(
         {
             "pnl_abs": [100.0, 100.0, -50.0],
@@ -22,7 +22,7 @@ def test_compute_metrics_known_trades():
     assert metrics["expectancy"] == round((100 + 100 - 50) / 3, 2)
     assert metrics["final_equity"] == 10150.0
     assert metrics["total_return_pct"] == 1.5
-    # drawdown desde el pico de 10200 hasta 10150 = -0.49%
+    # drawdown from the 10200 peak down to 10150 = -0.49%
     assert metrics["max_drawdown_pct"] == round((10150 - 10200) / 10200 * 100, 2)
 
 

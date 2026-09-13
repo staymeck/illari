@@ -1,23 +1,23 @@
-"""Estructura de mercado: máximos/mínimos, tendencia y niveles de
-soporte/resistencia — calculados con reglas objetivas de código, no "a ojo".
+"""Market structure: swing highs/lows, trend, and support/resistance levels —
+computed with objective code rules, not "eyeballed".
 
-Referencia: docs/PLAN.md — "Componentes del motor de análisis técnico", punto 1;
-y resources/12_claves_analisis_tecnico.pdf (Teoría de Dow, soporte y resistencia).
+Reference: docs/PLAN.md — "Technical analysis engine components", item 1;
+and resources/12_claves_analisis_tecnico.pdf (Dow Theory, support and resistance).
 """
 from __future__ import annotations
 
 import pandas as pd
 
-# Un swing point (pivote) requiere `order` velas más bajas/altas a cada lado
-# para confirmarse — evita marcar ruido de una sola vela como pivote real.
+# A swing point (pivot) requires `order` bars lower/higher on each side to be
+# confirmed — this avoids marking a single bar of noise as a real pivot.
 _DEFAULT_ORDER = 3
 
 
 def find_swing_points(df: pd.DataFrame, order: int = _DEFAULT_ORDER) -> pd.DataFrame:
-    """Marca pivotes de máximo y mínimo confirmados (fractal simple: el pivote
-    es el extremo dentro de una ventana de `2*order + 1` velas centrada en él).
+    """Marks confirmed swing high/low pivots (simple fractal: the pivot is the
+    extreme within a `2*order + 1` bar window centered on it).
 
-    Devuelve el mismo DataFrame con dos columnas booleanas nuevas:
+    Returns the same DataFrame with two new boolean columns:
     `is_swing_high`, `is_swing_low`.
     """
     highs = df["high"]
@@ -38,19 +38,19 @@ def find_swing_points(df: pd.DataFrame, order: int = _DEFAULT_ORDER) -> pd.DataF
 
 
 def classify_trend(df: pd.DataFrame, order: int = _DEFAULT_ORDER, lookback_swings: int = 2) -> str:
-    """Clasifica la tendencia según la Teoría de Dow: compara los últimos
-    `lookback_swings` máximos y mínimos confirmados.
+    """Classifies the trend per Dow Theory: compares the last `lookback_swings`
+    confirmed highs and lows.
 
-    - "alcista": máximos y mínimos crecientes
-    - "bajista": máximos y mínimos decrecientes
-    - "lateral": no hay swings suficientes o no son consistentes
+    - "uptrend": rising highs and rising lows
+    - "downtrend": falling highs and falling lows
+    - "sideways": not enough swings, or they are not consistent
     """
     marked = find_swing_points(df, order=order)
     highs = marked.loc[marked["is_swing_high"], "high"].tail(lookback_swings)
     lows = marked.loc[marked["is_swing_low"], "low"].tail(lookback_swings)
 
     if len(highs) < lookback_swings or len(lows) < lookback_swings:
-        return "lateral"
+        return "sideways"
 
     highs_rising = highs.is_monotonic_increasing
     lows_rising = lows.is_monotonic_increasing
@@ -58,25 +58,25 @@ def classify_trend(df: pd.DataFrame, order: int = _DEFAULT_ORDER, lookback_swing
     lows_falling = lows.is_monotonic_decreasing
 
     if highs_rising and lows_rising:
-        return "alcista"
+        return "uptrend"
     if highs_falling and lows_falling:
-        return "bajista"
-    return "lateral"
+        return "downtrend"
+    return "sideways"
 
 
 def support_resistance_levels(
     df: pd.DataFrame, order: int = _DEFAULT_ORDER, tolerance_pct: float = 0.5
 ) -> dict[str, list[float]]:
-    """Agrupa los swing lows en niveles de soporte y los swing highs en niveles
-    de resistencia, fusionando pivotes que caen dentro de `tolerance_pct`% entre
-    sí (para no reportar 10 "niveles" que en la práctica son el mismo)."""
+    """Groups swing lows into support levels and swing highs into resistance
+    levels, merging pivots that fall within `tolerance_pct`% of each other (so
+    we don't report 10 "levels" that are in practice the same one)."""
     marked = find_swing_points(df, order=order)
 
     def _cluster(values: pd.Series) -> list[float]:
         levels: list[float] = []
         for value in sorted(values.tolist()):
             if levels and abs(value - levels[-1]) / levels[-1] * 100 <= tolerance_pct:
-                levels[-1] = (levels[-1] + value) / 2  # funde con el nivel cercano
+                levels[-1] = (levels[-1] + value) / 2  # merge into the nearby level
             else:
                 levels.append(value)
         return levels

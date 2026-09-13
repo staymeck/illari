@@ -1,20 +1,19 @@
-"""Motor de backtest mínimo, para validar el pipeline completo
-(datos -> señal -> simulación -> métricas) antes de escalar a 5 mercados x 3
-timeframes con todos los componentes del motor de análisis.
+"""Minimal backtest engine, used to validate the full pipeline (data -> signal
+-> simulation -> metrics) before scaling up to 5 markets x 3 timeframes with
+every component of the analysis engine.
 
-Estrategia usada en esta validación (deliberadamente simple, solo con
-estructura de mercado — sin Fibonacci/velas/volumen todavía, ver docs/PLAN.md
-"Próximos pasos inmediatos"): comprar cerca de un soporte confirmado mientras
-la tendencia (Dow) es alcista, con stop bajo el soporte y objetivo a un
-múltiplo R del riesgo.
+Strategy used for this validation (deliberately simple, market structure only
+— no Fibonacci/candlesticks/volume yet, see docs/PLAN.md "Immediate next
+steps"): buy near a confirmed support level while the (Dow) trend is an
+uptrend, with a stop below support and a target at a multiple R of the risk.
 
-Importante sobre look-ahead bias: en cada paso `t` solo se le pasa a
-`estructura.py` la porción de la serie `df.iloc[:t+1]` (nada del futuro). Los
-pivotes de `find_swing_points` usan una ventana centrada, así que los últimos
-`order` bares de cualquier slice quedan automáticamente sin confirmar
-(NaN -> False) hasta que existan suficientes barras "futuras" dentro del propio
-slice — es decir, la función ya es segura contra look-ahead siempre que se la
-alimente con datos hasta `t`, sin adelantar nada.
+A note on look-ahead bias: at every step `t`, `structure.py` is only given a
+fixed-size trailing window `df.iloc[t + 1 - lookback_bars : t + 1]` (nothing
+from the future, and never a growing window). Pivots from `find_swing_points`
+use a centered rolling window, so the last `order` bars of any slice are
+automatically left unconfirmed (NaN -> False) until enough "future" bars exist
+within the slice itself — i.e. the function is already look-ahead safe as long
+as it's only fed data up to `t`.
 """
 from __future__ import annotations
 
@@ -23,29 +22,29 @@ from dataclasses import dataclass
 import pandas as pd
 
 from config.markets import session_for_hour
-from src.analysis.estructura import classify_trend, support_resistance_levels
+from src.analysis.structure import classify_trend, support_resistance_levels
 
 
 @dataclass(frozen=True)
 class BacktestConfig:
-    lookback_bars: int = 200          # ventana de historia para calcular estructura
-    swing_order: int = 3              # ver estructura.find_swing_points
-    support_tolerance_pct: float = 1.0  # qué tan "cerca" del soporte cuenta como toque
-    stop_pct_below_support: float = 0.5  # stop = soporte * (1 - este%)
-    reward_risk_ratio: float = 2.0    # objetivo = entrada + R * riesgo
-    max_holding_bars: int = 24        # cierre forzado si no toca stop/target antes
-    fee_pct: float = 0.1              # comisión de Binance por lado (~0.1% spot)
+    lookback_bars: int = 200          # trailing window used to compute structure
+    swing_order: int = 3              # see structure.find_swing_points
+    support_tolerance_pct: float = 1.0  # how close to support counts as a touch
+    stop_pct_below_support: float = 0.5  # stop = support * (1 - this%)
+    reward_risk_ratio: float = 2.0    # target = entry + R * risk
+    max_holding_bars: int = 24        # force-close if stop/target isn't hit before this
+    fee_pct: float = 0.1              # Binance fee per side (~0.1% spot)
     initial_equity: float = 10_000.0
 
 
 def _find_entry_signal(history: pd.DataFrame, cfg: BacktestConfig) -> float | None:
-    """Devuelve el nivel de soporte que gatilla la entrada, o None si no hay señal,
-    evaluando solo con datos hasta la última fila de `history` (sin futuro)."""
+    """Returns the support level that triggers an entry, or None if there's no
+    signal, evaluating only with data up to the last row of `history` (no future)."""
     if len(history) < cfg.lookback_bars:
         return None
 
     trend = classify_trend(history, order=cfg.swing_order)
-    if trend != "alcista":
+    if trend != "uptrend":
         return None
 
     levels = support_resistance_levels(history, order=cfg.swing_order)
@@ -62,8 +61,8 @@ def _find_entry_signal(history: pd.DataFrame, cfg: BacktestConfig) -> float | No
 
 
 def run_backtest(df: pd.DataFrame, cfg: BacktestConfig | None = None) -> tuple[pd.DataFrame, pd.Series]:
-    """Simula la estrategia sobre `df` (columnas: timestamp, open, high, low,
-    close, volume) y devuelve (trades, equity_curve)."""
+    """Simulates the strategy over `df` (columns: timestamp, open, high, low,
+    close, volume) and returns (trades, equity_curve)."""
     cfg = cfg or BacktestConfig()
     df = df.reset_index(drop=True)
 
@@ -74,7 +73,8 @@ def run_backtest(df: pd.DataFrame, cfg: BacktestConfig | None = None) -> tuple[p
     i = cfg.lookback_bars
     n = len(df)
     while i < n - 1:
-        history = df.iloc[: i + 1]
+        window_start = max(0, i + 1 - cfg.lookback_bars)
+        history = df.iloc[window_start : i + 1]
         support = _find_entry_signal(history, cfg)
 
         if support is None:
@@ -82,7 +82,7 @@ def run_backtest(df: pd.DataFrame, cfg: BacktestConfig | None = None) -> tuple[p
             i += 1
             continue
 
-        entry_idx = i + 1  # se entra a la apertura de la próxima vela (sin lookahead)
+        entry_idx = i + 1  # enter at the next candle's open (no look-ahead)
         if entry_idx >= n:
             break
         entry_price = df["open"].iloc[entry_idx]
@@ -111,7 +111,7 @@ def run_backtest(df: pd.DataFrame, cfg: BacktestConfig | None = None) -> tuple[p
             exit_price = df["close"].iloc[exit_idx]
 
         gross_pnl_pct = (exit_price - entry_price) / entry_price * 100
-        net_pnl_pct = gross_pnl_pct - 2 * cfg.fee_pct  # comisión de entrada + salida
+        net_pnl_pct = gross_pnl_pct - 2 * cfg.fee_pct  # entry + exit fees
         trade_equity_before = equity
         equity *= 1 + net_pnl_pct / 100
         pnl_abs = equity - trade_equity_before
@@ -133,7 +133,7 @@ def run_backtest(df: pd.DataFrame, cfg: BacktestConfig | None = None) -> tuple[p
         )
         equity_curve.append(equity)
 
-        i = exit_idx + 1  # sin solapar operaciones
+        i = exit_idx + 1  # don't overlap trades
 
     trades_df = pd.DataFrame(trades)
     equity_series = pd.Series(equity_curve, name="equity")
@@ -141,7 +141,7 @@ def run_backtest(df: pd.DataFrame, cfg: BacktestConfig | None = None) -> tuple[p
 
 
 def compute_metrics(trades: pd.DataFrame, equity_curve: pd.Series, initial_equity: float) -> dict:
-    """Métricas estándar del laboratorio, mismo formato que resources/report.md."""
+    """Standard lab metrics, same format as resources/report.md."""
     if trades.empty:
         return {
             "n_trades": 0,

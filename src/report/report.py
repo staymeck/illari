@@ -1,5 +1,5 @@
-"""Genera un report.md con métricas globales y desglose por hora/sesión,
-mismo formato que resources/report.md (el reporte de la sesión anterior)."""
+"""Generates a report.md with overall metrics and an hour/session breakdown,
+same format as resources/report.md (the report from the previous session)."""
 from __future__ import annotations
 
 from pathlib import Path
@@ -34,35 +34,36 @@ def render_report(
     out_path: Path,
 ) -> None:
     lines = [
-        "# Reporte de backtest — Laboratorio de trading (validación mínima del pipeline)",
+        "# Backtest report — Trading lab (minimal pipeline validation)",
         "",
-        f"Mercado: **{symbol}** · Timeframe: **{timeframe}**",
+        f"Market: **{symbol}** · Timeframe: **{timeframe}**",
         "",
-        "> Corrida de validación del motor end-to-end (solo estructura de mercado,",
-        "> sin Fibonacci/velas/volumen todavía — ver docs/PLAN.md). No usar estos",
-        "> números como evidencia de una estrategia rentable: falta walk-forward,",
-        "> out-of-sample, y una muestra de operaciones bastante más grande.",
+        "> End-to-end validation run of the engine (market structure only,",
+        "> no Fibonacci/candlesticks/volume yet — see docs/PLAN.md). Do not",
+        "> treat these numbers as evidence of a profitable strategy: this is",
+        "> missing walk-forward validation, out-of-sample testing, and a much",
+        "> larger trade sample.",
         "",
-        "## Métricas globales",
+        "## Overall metrics",
         "",
-        f"- Operaciones: **{metrics['n_trades']}**",
+        f"- Trades: **{metrics['n_trades']}**",
         f"- Win rate: **{metrics['win_rate_pct']}%**",
         f"- Profit factor: **{metrics['profit_factor']}**",
         f"- Expectancy: **{metrics['expectancy']}**",
-        f"- Drawdown máximo: **{metrics['max_drawdown_pct']}%**",
-        f"- Retorno total: **{metrics['total_return_pct']}%**",
-        f"- Equity final: **{metrics['final_equity']}**",
+        f"- Max drawdown: **{metrics['max_drawdown_pct']}%**",
+        f"- Total return: **{metrics['total_return_pct']}%**",
+        f"- Final equity: **{metrics['final_equity']}**",
         "",
     ]
 
     if not trades.empty:
-        lines += ["## Desglose por hora de entrada (UTC)", ""]
+        lines += ["## Breakdown by entry hour (UTC)", ""]
         lines.append(_breakdown_by(trades, "hour_utc").to_markdown(index=False))
-        lines += ["", "## Desglose por sesión de mercado", ""]
+        lines += ["", "## Breakdown by market session", ""]
         lines.append(_breakdown_by(trades, "session").to_markdown(index=False))
         lines.append("")
     else:
-        lines.append("_No se generó ninguna operación en el rango simulado._")
+        lines.append("_No trades were generated in the simulated range._")
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text("\n".join(lines), encoding="utf-8")

@@ -1,8 +1,8 @@
-"""Backtest mínimo end-to-end (Próximos pasos inmediatos, paso 4 de docs/PLAN.md):
-BTC/USDT, timeframe 1h, para validar el pipeline completo (datos -> señal ->
-simulación -> reporte) antes de escalar a los 5 mercados x 3 timeframes.
+"""Minimal end-to-end backtest (docs/PLAN.md "Immediate next steps", step 4):
+BTC/USDT, 1h timeframe, to validate the full pipeline (data -> signal ->
+simulation -> report) before scaling up to 5 markets x 3 timeframes.
 
-Uso:
+Usage:
     .venv/bin/python scripts/run_minimal_backtest.py
 """
 from __future__ import annotations
@@ -23,29 +23,29 @@ UNTIL = "2024-12-01"
 
 
 def main() -> None:
-    print(f"Chequeando fecha de listado de {SYMBOL}...")
+    print(f"Checking listing date for {SYMBOL}...")
     listed_since = earliest_available(SYMBOL, timeframe="1d")
-    print(f"  -> primera vela disponible: {listed_since}")
+    print(f"  -> first candle available: {listed_since}")
 
-    print(f"Descargando velas {SYMBOL} {TIMEFRAME} de {SINCE} a {UNTIL}...")
+    print(f"Downloading {SYMBOL} {TIMEFRAME} candles from {SINCE} to {UNTIL}...")
     df = fetch_ohlcv(SYMBOL, TIMEFRAME, since=SINCE, until=UNTIL)
-    print(f"  -> {len(df)} velas descargadas")
+    print(f"  -> {len(df)} candles downloaded")
 
     if df.empty:
-        print("No se descargaron velas — no se puede continuar.")
+        print("No candles were downloaded — cannot continue.")
         return
 
     cfg = BacktestConfig()
     trades, equity_curve = run_backtest(df, cfg)
     metrics = compute_metrics(trades, equity_curve, cfg.initial_equity)
 
-    print("\nMétricas:")
+    print("\nMetrics:")
     for key, value in metrics.items():
         print(f"  {key}: {value}")
 
     out_path = Path(__file__).resolve().parents[1] / "reports" / "minimal_backtest_report.md"
     render_report(SYMBOL, TIMEFRAME, trades, metrics, out_path)
-    print(f"\nReporte escrito en {out_path}")
+    print(f"\nReport written to {out_path}")
 
 
 if __name__ == "__main__":
