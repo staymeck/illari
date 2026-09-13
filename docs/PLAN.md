@@ -200,9 +200,12 @@ Four layers, each a named registry under `src/strategies/`:
   (lower-Bollinger-Band touch).
 - **confirmations** (`src/strategies/confirmations/`, a list — all must
   pass) — `fibonacci`, `candlestick`, `volume`, `rsi_momentum`,
-  `macd_momentum`, `vwap_bias`.
-- **risk** (`src/strategies/risk/`) — `fixed_pct` stop + `risk_reward`
-  target.
+  `macd_momentum`, `vwap_bias`, `adx_strength` (trend *strength*, not just
+  direction), `session_filter` (the original "hora de entrada" idea, now an
+  actual filter).
+- **risk** (`src/strategies/risk/`) — `fixed_pct` or `atr_multiple` stop +
+  `risk_reward` target. A stop's `trigger` (`intrabar`, default, or `close`)
+  controls when it confirms — see "Kaufman validation" below.
 
 `src/strategies/builder.py` resolves a YAML file (see
 `config/strategies/*.yaml`) into a `ResolvedStrategy`; `src/backtest/engine.py`
@@ -220,3 +223,54 @@ actually compose into different, runnable strategies.
 Explicitly out of scope for this catalog (don't fit the same entry-signal
 pipeline): grid trading, arbitrage/pairs/stat-arb, fundamental/event/news
 trading, machine learning.
+
+## Validated against Kaufman, *Trading Systems and Methods* (5th ed.)
+
+`resources/TSaM.pdf` — a serious, widely-respected reference (Wiley Trading),
+well beyond the two intro-level PDFs the lab started with. Checked our
+approach against it directly rather than assuming; concretely:
+
+- **Multi-market testing = robustness, not redundancy.** "If a technique
+  works in the Swiss franc but not the euro... the method is most likely not
+  robust but fine-tuned to each market" (ch. 21) — this is exactly why the
+  lab runs every strategy across all 5 markets instead of trusting one.
+- **Dropping 5m is the expected, documented outcome, not a quirk of our
+  setup.** Kaufman's own 17-market test across 2-80 day calculation periods:
+  "faster trends are uniformly losses, while progressively longer trends are
+  profitable" — fast periods "generate too many trades with small profits
+  and losses that will not be greater than the cost." Matches our 5m result
+  (390-524 trades, -46% to -66%, every strategy variant tried) closely
+  enough that 5m was dropped from `config/markets.py` entirely.
+- **ADX as a trend-strength filter, at nearly our own threshold.** Ch. 23's
+  market-ranking framework uses "Wilder's ADX... but only for values greater
+  than 0.20" — we'd already picked `min_adx: 25` for `adx_strength`
+  independently; close enough to be reassuring rather than a coincidence to
+  chase.
+- **Stops are "a duel with price noise"** (ch. 23) — a stop can capture the
+  worst exit right before a recovery. Kaufman's own fix: "stop-loss orders
+  are usually based on the closing price, or... the actual exit is still on
+  the close" — implemented as `risk.stop.trigger: close` (see
+  `config/strategies/trend_pullback_close_stop.yaml`), alongside a new
+  `stop_was_premature` diagnostic per trade (src/backtest/engine.py) and a
+  "Stop-loss noise diagnostic" report section (src/report/render.py)
+  measuring exactly what fraction of stop-outs would have reached target
+  anyway. Targets deliberately do NOT get the same close-confirmation —
+  Kaufman recommends the opposite for profit-taking (capture the intraday
+  spike immediately, don't wait for the close).
+- **Fixed-% stops are the least favored option** — "the ones most likely to
+  work must adapt to volatility... rather than a fixed dollar amount or a
+  percentage of price" — consistent with adding `atr_multiple` as a second
+  stop piece, though our own test (BTC/USDT, same ATR multiple on 5m vs 1h)
+  found the same caution Kaufman gives for his own ATR-stop test: it's a
+  single-market/period result, and the right multiple needs its own tuning
+  per timeframe, not one setting that transfers everywhere.
+
+**Gaps this surfaced that the catalog still doesn't cover** (candidates for
+later, not built yet): trailing stops ("more practical than initial stops,"
+per Kaufman) is a real hole — the catalog only has initial stops; multiple/
+partial profit targets (scaling out in stages instead of one target);
+volatility-based position sizing as an alternative to a stop rather than a
+companion to it; and a "% of profitable tests across a parameter range"
+robustness metric (ch. 21) — the lab currently reports one point estimate
+per strategy run, not a sweep, which is a real rigor gap relative to
+Kaufman's own testing standard.

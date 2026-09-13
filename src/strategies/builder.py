@@ -4,6 +4,10 @@ can run directly.
 
 See docs/PLAN.md, "Config-driven strategy catalog", and
 config/strategies/trend_pullback_fib.yaml for the file shape.
+
+`risk.stop.trigger` ("intrabar", the default, or "close") controls how a
+stop is confirmed — see src/backtest/engine.py and docs/PLAN.md's Kaufman
+(Trading Systems and Methods) reference for why this exists.
 """
 from __future__ import annotations
 
@@ -42,6 +46,7 @@ class ResolvedStrategy:
     confirmations: list[ResolvedConfirmation]
     stop_fn: Callable
     stop_params: dict
+    stop_trigger: str
     target_fn: Callable
     target_params: dict
     max_holding_bars: int
@@ -80,6 +85,7 @@ def load_strategy(path: str | Path) -> ResolvedStrategy:
         confirmations=confirmations,
         stop_fn=RISK_STOPS.get(risk_cfg["stop"]["piece"]),
         stop_params=risk_cfg["stop"].get("params", {}),
+        stop_trigger=risk_cfg["stop"].get("trigger", "intrabar"),
         target_fn=RISK_TARGETS.get(risk_cfg["target"]["piece"]),
         target_params=risk_cfg["target"].get("params", {}),
         max_holding_bars=style_cfg.get("max_holding_bars", 24),

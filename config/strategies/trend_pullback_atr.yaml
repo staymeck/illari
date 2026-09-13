@@ -1,0 +1,50 @@
+# Same as trend_pullback_fib.yaml, but with an ATR-based stop instead of a
+# fixed %. Direct test of the hypothesis from the 5m-vs-1h comparison: does
+# scaling the stop to actual volatility fix (or at least improve) the 5m
+# timeframe's catastrophic result? See docs/PLAN.md.
+name: trend_pullback_atr
+
+engine:
+  lookback_bars: 200
+  swing_order: 3
+
+context:
+  piece: dow_trend
+  required: uptrend
+  params:
+    order: 3
+    lookback_swings: 2
+
+setup:
+  piece: support_touch
+  params:
+    order: 3
+    tolerance_pct: 1.0
+
+confirmations:
+  - piece: fibonacci
+    params:
+      order: 3
+      tolerance_pct: 1.0
+  - piece: candlestick
+  - piece: volume
+    params:
+      window: 20
+      spike_threshold: 1.2
+      min_bias: 0.1
+
+risk:
+  stop:
+    piece: atr_multiple
+    params:
+      period: 14
+      multiple: 1.5
+  target:
+    piece: risk_reward
+    params:
+      ratio: 2.0
+
+style:
+  max_holding_bars: 24
+  fee_pct: 0.1
+  initial_equity: 10000.0

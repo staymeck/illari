@@ -24,11 +24,18 @@ MARKETS: list[Market] = [
     Market("DOGE/USDT", "driven by sentiment/social media rather than fundamentals"),
 ]
 
-# Multi-context timeframes: fine-grained (entries), intermediate, and global.
-# 30m added after the initial 5m/1h/1d scale-up showed 5m's noise/fixed-cost
-# mismatch and 1h's better-but-still-thin trade count — it's the middle
-# ground Binance actually offers natively (Binance has no 25m interval).
-TIMEFRAMES: list[str] = ["5m", "30m", "1h", "1d"]
+# Multi-context timeframes: intermediate and global. 5m was dropped after
+# the initial scale-up: 390-524 trades per market, -46% to -66% return
+# across the board, on every strategy variant tried — dominated by noise
+# relative to fixed trading costs. This isn't specific to our setup: Kaufman
+# (Trading Systems and Methods, ch. 21) finds the same pattern testing 17
+# futures markets across calculation periods 2-80 days — "faster trends are
+# uniformly losses, while progressively longer trends are profitable" — and
+# explicitly excludes very fast periods for the same reason ("too fast...
+# generates too many trades with small profits and losses that will not be
+# greater than the cost"). 30m (added when exploring "25m" — Binance has no
+# such interval) is now the finest granularity in the lab.
+TIMEFRAMES: list[str] = ["30m", "1h", "1d"]
 
 # Market sessions in UTC (start/end hours, end exclusive). Used to label each
 # simulated trade and break down results by session.

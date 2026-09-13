@@ -27,6 +27,25 @@ precomputed for the entire series upfront, at every step `i` we only ever
 look at pivots with `j + swing_order <= i` (via `_confirmed_pivots_as_of`) —
 so the backtest never uses a pivot before it would really have been
 confirmed.
+
+Stop trigger (`risk.stop.trigger` in the YAML, "intrabar" by default) and the
+`stop_was_premature` diagnostic are both directly informed by Kaufman,
+*Trading Systems and Methods* (5th ed.), ch. 23 "Risk Control":
+- "intrabar" (default, matches the original hardcoded strategy exactly):
+  exits the instant the bar's low touches the stop — realistic (a resting
+  stop order fires on touch), but exposed to a single noisy wick.
+- "close": only confirms the stop if the bar's *close* is through it
+  ("...stop-loss orders are usually based on the closing price... to take
+  advantage of a pullback" — Kaufman). Targets are deliberately NOT given
+  the same option: Kaufman recommends the opposite asymmetry for
+  profit-taking ("you would want to exit at the time of the intraday spike
+  rather than waiting for the end of the day"), so targets always trigger
+  intrabar here.
+- `stop_was_premature` records, for every stop-exited trade, whether price
+  would have reached the target anyway before the holding window ran out
+  had the stop not fired — a direct measurement of how much of the stop-out
+  count is "noise" versus a real trend failure (see
+  src/report/render.py's breakdown).
 """
 from __future__ import annotations
 
@@ -119,11 +138,22 @@ def run_backtest(df: pd.DataFrame, strategy: ResolvedStrategy) -> tuple[pd.DataF
         exit_idx = None
         exit_price = None
         exit_reason = "timeout"
+        stop_was_premature = None
         last_possible = min(entry_idx + strategy.max_holding_bars, n - 1)
         for j in range(entry_idx, last_possible + 1):
             bar = df.iloc[j]
-            if bar["low"] <= stop_price:
-                exit_idx, exit_price, exit_reason = j, stop_price, "stop"
+            stop_hit = bar["close"] <= stop_price if strategy.stop_trigger == "close" else bar["low"] <= stop_price
+            if stop_hit:
+                exit_idx = j
+                exit_price = bar["close"] if strategy.stop_trigger == "close" else stop_price
+                exit_reason = "stop"
+                # Diagnostic (per Kaufman, Trading Systems and Methods, ch. 23:
+                # stops are "a duel with price noise" — a stop can capture the
+                # worst of a move that reverses right after): would the target
+                # still have been reached later, had this stop not fired?
+                stop_was_premature = bool(
+                    (df["high"].iloc[j + 1 : last_possible + 1] >= target_price).any()
+                )
                 break
             if bar["high"] >= target_price:
                 exit_idx, exit_price, exit_reason = j, target_price, "target"
@@ -145,8 +175,11 @@ def run_backtest(df: pd.DataFrame, strategy: ResolvedStrategy) -> tuple[pd.DataF
             "hour_utc": entry_ts.hour,
             "session": session_for_hour(entry_ts.hour),
             "entry_price": entry_price,
+            "stop_price": stop_price,
+            "target_price": target_price,
             "exit_price": exit_price,
             "exit_reason": exit_reason,
+            "stop_was_premature": stop_was_premature,
             "pnl_pct": net_pnl_pct,
             "pnl_abs": pnl_abs,
             "equity_after": equity,

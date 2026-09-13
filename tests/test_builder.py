@@ -57,6 +57,7 @@ def test_load_strategy_resolves_pieces_and_params(tmp_path):
     assert [c.name for c in strategy.confirmations] == ["fibonacci", "volume"]
     assert strategy.confirmations[1].params == {"min_bias": 0.2}
     assert strategy.stop_params == {"pct_below_reference": 1.0}
+    assert strategy.stop_trigger == "intrabar"  # default, not set in _MINIMAL_YAML
     assert strategy.target_params == {"ratio": 3.0}
     assert strategy.max_holding_bars == 10
     assert strategy.fee_pct == 0.05
@@ -81,3 +82,14 @@ def test_load_strategy_unknown_piece_raises_clear_error(tmp_path):
 
     with pytest.raises(KeyError, match="Unknown context piece 'does_not_exist'"):
         load_strategy(path)
+
+
+def test_load_strategy_explicit_close_stop_trigger(tmp_path):
+    path = tmp_path / "strategy.yaml"
+    path.write_text(_UNKNOWN_PIECE_YAML.replace("does_not_exist", "dow_trend").replace(
+        "stop: {piece: fixed_pct}", "stop: {piece: fixed_pct, trigger: close}"
+    ), encoding="utf-8")
+
+    strategy = load_strategy(path)
+
+    assert strategy.stop_trigger == "close"
