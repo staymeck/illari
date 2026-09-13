@@ -8,7 +8,8 @@ that don't use the higher_tf_trend confirmation simply ignore it, so one
 script covers strategies with and without it.
 
 Usage:
-    .venv/bin/python scripts/validate_htf.py
+    .venv/bin/python scripts/validate_htf.py [timeframe] [higher_timeframe]
+    .venv/bin/python scripts/validate_htf.py 30m 1d
 """
 from __future__ import annotations
 
@@ -23,8 +24,8 @@ from src.backtest.walk_forward import chronological_folds
 from src.data.fetcher import fetch_ohlcv
 from src.strategies.builder import load_strategy
 
-TIMEFRAME = "1h"
-HIGHER_TIMEFRAME = "1d"
+TIMEFRAME = sys.argv[1] if len(sys.argv) > 1 else "1h"
+HIGHER_TIMEFRAME = sys.argv[2] if len(sys.argv) > 2 else "1d"
 SINCE = "2023-09-13"
 UNTIL = "2026-09-13"
 N_FOLDS = 3
