@@ -1,10 +1,16 @@
-"""Generates a report.md with overall metrics and an hour/session breakdown,
-same format as resources/report.md (the report from the previous session)."""
+"""Renders a single backtest run into a markdown report.
+
+Rendering (`render_run_markdown`) is a pure function — no filesystem access —
+so it's testable without touching disk; `write_run_report` is the thin
+wrapper that saves it under ./reports (see src/report/paths.py).
+"""
 from __future__ import annotations
 
 from pathlib import Path
 
 import pandas as pd
+
+from src.report.paths import REPORTS_DIR, run_report_path
 
 
 def _breakdown_by(trades: pd.DataFrame, column: str) -> pd.DataFrame:
@@ -26,17 +32,19 @@ def _breakdown_by(trades: pd.DataFrame, column: str) -> pd.DataFrame:
     return pd.DataFrame(rows).sort_values(column)
 
 
-def render_report(
+def render_run_markdown(
     symbol: str,
     timeframe: str,
     trades: pd.DataFrame,
     metrics: dict,
-    out_path: Path,
-) -> None:
+    scenario: str = "default",
+) -> str:
+    """Builds the markdown text for one backtest run. Same metric format as
+    resources/report.md (the report from the previous session)."""
     lines = [
-        "# Backtest report — Trading lab (minimal pipeline validation)",
+        "# Backtest report — Trading lab",
         "",
-        f"Market: **{symbol}** · Timeframe: **{timeframe}**",
+        f"Market: **{symbol}** · Timeframe: **{timeframe}** · Scenario: **{scenario}**",
         "",
         "> End-to-end validation run of the engine (structure + Fibonacci",
         "> confluence + candlestick + volume confirmation; funding rate/Fear &",
@@ -72,5 +80,21 @@ def render_report(
     else:
         lines.append("_No trades were generated in the simulated range._")
 
+    return "\n".join(lines)
+
+
+def write_run_report(
+    symbol: str,
+    timeframe: str,
+    trades: pd.DataFrame,
+    metrics: dict,
+    scenario: str = "default",
+    reports_dir: Path = REPORTS_DIR,
+) -> Path:
+    """Renders and saves a single run's report under `reports_dir`, following
+    the standard naming from src/report/paths.py. Returns the path written."""
+    out_path = run_report_path(symbol, timeframe, scenario, reports_dir=reports_dir)
+    markdown = render_run_markdown(symbol, timeframe, trades, metrics, scenario=scenario)
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    out_path.write_text("\n".join(lines), encoding="utf-8")
+    out_path.write_text(markdown, encoding="utf-8")
+    return out_path

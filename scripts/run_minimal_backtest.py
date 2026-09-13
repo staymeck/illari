@@ -14,10 +14,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from src.backtest.engine import BacktestConfig, compute_metrics, run_backtest
 from src.data.fetcher import earliest_available, fetch_ohlcv
-from src.report.report import render_report
+from src.report.render import write_run_report
+from src.report.summary import RunResult, write_summary_report
 
 SYMBOL = "BTC/USDT"
 TIMEFRAME = "1h"
+SCENARIO = "minimal_validation_2024h2"
 SINCE = "2024-06-01"
 UNTIL = "2024-12-01"
 
@@ -43,9 +45,11 @@ def main() -> None:
     for key, value in metrics.items():
         print(f"  {key}: {value}")
 
-    out_path = Path(__file__).resolve().parents[1] / "reports" / "minimal_backtest_report.md"
-    render_report(SYMBOL, TIMEFRAME, trades, metrics, out_path)
+    out_path = write_run_report(SYMBOL, TIMEFRAME, trades, metrics, scenario=SCENARIO)
     print(f"\nReport written to {out_path}")
+
+    summary_path = write_summary_report([RunResult(SYMBOL, TIMEFRAME, metrics, scenario=SCENARIO)])
+    print(f"Summary written to {summary_path}")
 
 
 if __name__ == "__main__":
