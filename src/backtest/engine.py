@@ -19,13 +19,21 @@ buy when all of the following line up on the same candle —
 
 Stop goes below the support level, target is a multiple R of the risk.
 
-A note on look-ahead bias: at every step `t`, the analysis functions are only
-given a fixed-size trailing window `df.iloc[t + 1 - lookback_bars : t + 1]`
-(nothing from the future, and never a growing window). Pivots from
-`find_swing_points` use a centered rolling window, so the last `order` bars of
-any slice are automatically left unconfirmed (NaN -> False) until enough
-"future" bars exist within the slice itself — i.e. the function is already
-look-ahead safe as long as it's only fed data up to `t`.
+Performance note: `find_swing_points` is computed exactly once for the whole
+series (vectorized, O(n)) instead of being recomputed from scratch on a
+trailing slice at every single bar — this used to be the dominant cost of a
+run (see docs/PLAN.md discussion on 5 markets x 3 timeframes x 36 months).
+
+A note on look-ahead bias: a swing pivot at bar `j` needs `swing_order` bars
+*after* it to be confirmed (see structure.find_swing_points), so it's only
+"knowable" from bar `j + swing_order` onward. Even though pivots are
+precomputed for the entire series upfront, at every step `i` we only ever
+look at pivots with `j + swing_order <= i` (via `_confirmed_pivots_as_of`) —
+so the backtest never uses a pivot before it would really have been
+confirmed. This is equivalent to (and, unlike a naive fixed-size resliced
+window, doesn't spuriously hide pivots near the start of the lookback
+window) the original approach of feeding a fresh, growing-then-trimmed slice
+to `find_swing_points` at every bar.
 """
 from __future__ import annotations
 
@@ -36,7 +44,7 @@ import pandas as pd
 from config.markets import session_for_hour
 from src.analysis.candles import bullish_reversal_pattern
 from src.analysis.fibonacci import is_near_confluence, latest_up_leg
-from src.analysis.structure import classify_trend, support_resistance_levels
+from src.analysis.structure import classify_trend, find_swing_points, support_resistance_levels
 from src.analysis.volume import confirms_buyer_pressure, directional_volume_bias
 
 
@@ -67,22 +75,43 @@ class EntrySignal:
     volume_bias: float
 
 
-def _find_entry_signal(history: pd.DataFrame, cfg: BacktestConfig) -> EntrySignal | None:
-    """Returns the confluence signal that triggers an entry, or None if there's
-    no signal, evaluating only with data up to the last row of `history` (no future)."""
-    if len(history) < cfg.lookback_bars:
+def _confirmed_pivots_as_of(marked_full: pd.DataFrame, i: int, window_start: int, swing_order: int) -> pd.DataFrame:
+    """Slice of the precomputed pivots restricted to `[window_start, i]` AND
+    to only those pivots already confirmable at bar `i` (see module docstring,
+    "A note on look-ahead bias"). This is a cheap positional slice — no
+    recomputation — which is what makes precomputing pivots once safe and fast."""
+    confirmed_end = i - swing_order + 1  # exclusive
+    if confirmed_end <= window_start:
+        return marked_full.iloc[0:0]
+    return marked_full.iloc[window_start:confirmed_end]
+
+
+def _find_entry_signal(
+    price_window: pd.DataFrame, marked_window: pd.DataFrame, cfg: BacktestConfig
+) -> EntrySignal | None:
+    """Returns the confluence signal that triggers an entry, or None if
+    there's no signal.
+
+    `price_window` is the trailing OHLCV window up to and including the
+    current bar (its own close/volume are known once it closes). `marked_window`
+    is the subset of precomputed pivots that are both within the lookback
+    window and already confirmable as of the current bar (see
+    `_confirmed_pivots_as_of`) — structure/Fibonacci only ever see pivots they
+    would really have known about at this point in time.
+    """
+    if len(price_window) < cfg.lookback_bars:
         return None
 
-    trend = classify_trend(history, order=cfg.swing_order)
+    trend = classify_trend(marked_window, order=cfg.swing_order, marked=marked_window)
     if trend != "uptrend":
         return None
 
-    levels = support_resistance_levels(history, order=cfg.swing_order)
+    levels = support_resistance_levels(marked_window, order=cfg.swing_order, marked=marked_window)
     supports = levels["support"]
     if not supports:
         return None
 
-    last_close = history["close"].iloc[-1]
+    last_close = price_window["close"].iloc[-1]
     matched_support = None
     for level in supports:
         distance_pct = abs(last_close - level) / level * 100
@@ -92,7 +121,7 @@ def _find_entry_signal(history: pd.DataFrame, cfg: BacktestConfig) -> EntrySigna
     if matched_support is None:
         return None
 
-    leg = latest_up_leg(history, order=cfg.swing_order)
+    leg = latest_up_leg(marked_window, order=cfg.swing_order, marked=marked_window)
     if leg is None:
         return None
     confluence = is_near_confluence(last_close, leg["low"], leg["high"], cfg.fib_tolerance_pct)
@@ -100,20 +129,20 @@ def _find_entry_signal(history: pd.DataFrame, cfg: BacktestConfig) -> EntrySigna
         return None
     fib_ratio, fib_level = confluence
 
-    pattern = bullish_reversal_pattern(history, idx=len(history) - 1)
+    last_idx = len(price_window) - 1
+    pattern = bullish_reversal_pattern(price_window, idx=last_idx)
     if cfg.require_candle_confirmation and pattern is None:
         return None
 
-    last_idx = len(history) - 1
     if cfg.require_volume_confirmation and not confirms_buyer_pressure(
-        history,
+        price_window,
         idx=last_idx,
         window=cfg.volume_window,
         spike_threshold=cfg.volume_spike_threshold,
         min_bias=cfg.volume_min_bias,
     ):
         return None
-    volume_bias = directional_volume_bias(history, window=cfg.volume_window)
+    volume_bias = directional_volume_bias(price_window, window=cfg.volume_window)
 
     return EntrySignal(
         support_level=matched_support,
@@ -129,6 +158,7 @@ def run_backtest(df: pd.DataFrame, cfg: BacktestConfig | None = None) -> tuple[p
     close, volume) and returns (trades, equity_curve)."""
     cfg = cfg or BacktestConfig()
     df = df.reset_index(drop=True)
+    marked_full = find_swing_points(df, order=cfg.swing_order)  # computed once for the whole series
 
     trades: list[dict] = []
     equity = cfg.initial_equity
@@ -138,8 +168,9 @@ def run_backtest(df: pd.DataFrame, cfg: BacktestConfig | None = None) -> tuple[p
     n = len(df)
     while i < n - 1:
         window_start = max(0, i + 1 - cfg.lookback_bars)
-        history = df.iloc[window_start : i + 1]
-        signal = _find_entry_signal(history, cfg)
+        price_window = df.iloc[window_start : i + 1]
+        marked_window = _confirmed_pivots_as_of(marked_full, i, window_start, cfg.swing_order)
+        signal = _find_entry_signal(price_window, marked_window, cfg)
 
         if signal is None:
             equity_curve.append(equity)

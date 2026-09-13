@@ -1,7 +1,46 @@
 """Tests on synthetic data for src/backtest/engine.py."""
 import pandas as pd
 
-from src.backtest.engine import compute_metrics
+from src.analysis.structure import find_swing_points
+from src.backtest.engine import _confirmed_pivots_as_of, compute_metrics
+
+
+def _candles(closes: list[float]) -> pd.DataFrame:
+    idx = pd.date_range("2024-01-01", periods=len(closes), freq="h", tz="UTC")
+    return pd.DataFrame(
+        {
+            "timestamp": idx,
+            "open": closes,
+            "high": closes,
+            "low": closes,
+            "close": closes,
+            "volume": [1.0] * len(closes),
+        }
+    )
+
+
+def test_confirmed_pivots_as_of_hides_pivot_before_confirmation_bar():
+    # order=2 -> a pivot at index 5 needs 2 bars after it (index 7) to confirm.
+    closes = [5, 4, 3, 1, 3, 0.5, 1, 2, 3, 4]  # swing low at index 5 (value 0.5)
+    marked_full = find_swing_points(_candles(closes), order=2)
+
+    # One bar too early: the pivot must not be visible yet.
+    too_early = _confirmed_pivots_as_of(marked_full, i=6, window_start=0, swing_order=2)
+    assert not too_early["is_swing_low"].any()
+
+    # Exactly at the confirmation bar (5 + 2 = 7): now it must be visible.
+    on_time = _confirmed_pivots_as_of(marked_full, i=7, window_start=0, swing_order=2)
+    assert on_time["is_swing_low"].any()
+
+
+def test_confirmed_pivots_as_of_respects_window_start():
+    closes = [5, 4, 3, 1, 3, 0.5, 1, 2, 3, 4]
+    marked_full = find_swing_points(_candles(closes), order=2)
+
+    # Even though bar 7 would confirm it, a window starting after the pivot
+    # (e.g. a short lookback) must not see it either.
+    sliced_out = _confirmed_pivots_as_of(marked_full, i=7, window_start=6, swing_order=2)
+    assert sliced_out.empty
 
 
 def test_compute_metrics_known_trades():

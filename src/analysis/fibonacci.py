@@ -21,12 +21,16 @@ def retracement_levels(swing_low: float, swing_high: float) -> dict[float, float
     return {ratio: swing_high - leg_range * ratio for ratio in RETRACEMENT_RATIOS}
 
 
-def latest_up_leg(df: pd.DataFrame, order: int = 3) -> dict | None:
+def latest_up_leg(df: pd.DataFrame, order: int = 3, marked: pd.DataFrame | None = None) -> dict | None:
     """Finds the most recently completed up-leg: a confirmed swing low
     followed (later in time) by a confirmed swing high. Returns None when the
     most recent confirmed pivot is a low instead of a high — meaning price is
-    currently making new highs with no pullback yet to retrace against."""
-    marked = find_swing_points(df, order=order)
+    currently making new highs with no pullback yet to retrace against.
+
+    If `marked` is given (already carrying `is_swing_high`/`is_swing_low`,
+    e.g. computed once upfront for a whole backtest run — see
+    src/backtest/engine.py), it's used as-is instead of recomputing it."""
+    marked = marked if marked is not None else find_swing_points(df, order=order)
     highs = marked.loc[marked["is_swing_high"]]
     lows = marked.loc[marked["is_swing_low"]]
 
