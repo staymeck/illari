@@ -18,6 +18,7 @@ from src.strategies.confirmations.volume import volume as volume_confirmation
 from src.strategies.confirmations.vwap_bias import vwap_bias
 from src.strategies.context.dow_trend import dow_trend
 from src.strategies.context.ma_trend import ma_trend
+from src.strategies.context.probability_trend import probability_trend
 from src.strategies.risk.atr_stop import atr_stop
 from src.strategies.risk.fixed_pct import fixed_pct_stop, risk_reward_target
 from src.strategies.setups.breakout import breakout
@@ -346,3 +347,65 @@ def test_session_filter_piece_requires_sessions_param():
 
     with pytest.raises(ValueError, match="requires a non-empty 'sessions' param"):
         session_filter(ctx, {})
+
+
+def _synthetic_wandering_df(n: int = 400) -> pd.DataFrame:
+    rng = np.random.default_rng(0)
+    trend = np.linspace(0, 20, n)
+    cycle = 5 * np.sin(np.linspace(0, 8 * np.pi, n))
+    noise = rng.normal(0, 0.5, n).cumsum() * 0.1
+    close = 100 + trend + cycle + noise
+    high = close + rng.uniform(0.1, 0.5, n)
+    low = close - rng.uniform(0.1, 0.5, n)
+    return pd.DataFrame({"close": close, "high": high, "low": low})
+
+
+def _known_bucket_values(table: pd.DataFrame) -> tuple[float, float]:
+    """The (adx, rsi) midpoint of the table's most-populated bucket —
+    guaranteed to be a bucket the table actually has data for, since
+    per-dimension quantile bucketing doesn't guarantee every
+    (adx_bucket, rsi_bucket) pair was jointly observed for an arbitrary
+    real value."""
+    biggest = table.sort_values("n_samples", ascending=False).iloc[0]
+    adx_value = table.attrs["adx_edges"][int(biggest["adx_bucket"])].mid
+    rsi_value = table.attrs["rsi_edges"][int(biggest["rsi_bucket"])].mid
+    return float(adx_value), float(rsi_value)
+
+
+def test_probability_trend_piece_uptrend_when_probability_clears_threshold(monkeypatch):
+    from src.analysis.probability_table import build_frequency_table
+
+    df = _synthetic_wandering_df()
+    table = build_frequency_table(df, horizon_bars=5, n_buckets=5)
+    adx_value, rsi_value = _known_bucket_values(table)
+
+    monkeypatch.setattr("src.strategies.context.probability_trend.adx", lambda *_a, **_k: pd.Series([adx_value]))
+    monkeypatch.setattr("src.strategies.context.probability_trend.rsi", lambda *_a, **_k: pd.Series([rsi_value]))
+
+    ctx = EvalContext(price_window=df, marked_window=pd.DataFrame())
+    trend = probability_trend(ctx, {"table": table, "min_probability": 0.0})
+
+    assert trend == "uptrend"  # threshold of 0.0 always clears a known bucket
+
+
+def test_probability_trend_piece_sideways_when_threshold_impossible(monkeypatch):
+    from src.analysis.probability_table import build_frequency_table
+
+    df = _synthetic_wandering_df()
+    table = build_frequency_table(df, horizon_bars=5, n_buckets=5)
+    adx_value, rsi_value = _known_bucket_values(table)
+
+    monkeypatch.setattr("src.strategies.context.probability_trend.adx", lambda *_a, **_k: pd.Series([adx_value]))
+    monkeypatch.setattr("src.strategies.context.probability_trend.rsi", lambda *_a, **_k: pd.Series([rsi_value]))
+
+    ctx = EvalContext(price_window=df, marked_window=pd.DataFrame())
+    trend = probability_trend(ctx, {"table": table, "min_probability": 1.1})
+
+    assert trend == "sideways"
+
+
+def test_probability_trend_piece_requires_a_table_param():
+    ctx = EvalContext(price_window=_synthetic_wandering_df(), marked_window=pd.DataFrame())
+
+    with pytest.raises(ValueError, match="requires a pre-built 'table' param"):
+        probability_trend(ctx, {})
