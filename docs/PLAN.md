@@ -183,3 +183,40 @@ This is a reasonable starting point, adjustable during actual implementation.
   report but regenerated from code version-controlled in this repo.
 - Before accepting any strategy as good: check sample size and out-of-sample
   performance, not just the in-sample result.
+
+## Strategy catalog (config-driven, added after the initial scale-up)
+
+Once the 5-market x 4-timeframe scan showed the one hardcoded strategy losing
+money everywhere, the engine was generalized into a **catalog** of
+interchangeable pieces instead of one fixed set of rules, so new strategies
+can be assembled and backtested by writing a YAML file, not new Python.
+
+Four layers, each a named registry under `src/strategies/`:
+
+- **context** (`src/strategies/context/`) — is the market trending/ranging?
+  `dow_trend` (swing-point based) and `ma_trend` (moving-average cross).
+- **setup** (`src/strategies/setups/`) — where to look for an entry:
+  `support_touch`, `breakout` (Donchian-style), `mean_reversion`
+  (lower-Bollinger-Band touch).
+- **confirmations** (`src/strategies/confirmations/`, a list — all must
+  pass) — `fibonacci`, `candlestick`, `volume`, `rsi_momentum`,
+  `macd_momentum`, `vwap_bias`.
+- **risk** (`src/strategies/risk/`) — `fixed_pct` stop + `risk_reward`
+  target.
+
+`src/strategies/builder.py` resolves a YAML file (see
+`config/strategies/*.yaml`) into a `ResolvedStrategy`; `src/backtest/engine.py`
+runs it generically (context -> setup -> confirmations -> risk), long-only,
+with the required market regime itself configurable via `context.required`
+(default `uptrend`; `mean_reversion_bb.yaml` sets `any` since gating a
+mean-reversion setup behind an uptrend would defeat the point).
+
+`config/strategies/trend_pullback_fib.yaml` reproduces the original
+hardcoded strategy exactly (verified: all 20 five-market x four-timeframe
+results identical before/after the refactor). `breakout_momentum.yaml` and
+`mean_reversion_bb.yaml` are two more catalog strategies proving the pieces
+actually compose into different, runnable strategies.
+
+Explicitly out of scope for this catalog (don't fit the same entry-signal
+pipeline): grid trading, arbitrage/pairs/stat-arb, fundamental/event/news
+trading, machine learning.

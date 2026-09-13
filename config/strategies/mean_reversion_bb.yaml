@@ -1,0 +1,50 @@
+# Example catalog strategy #3: mean reversion off the lower Bollinger Band
+# instead of trend-following — note `context.required: any`, since gating a
+# mean-reversion setup behind an uptrend (as the trend-following strategies
+# above need) would defeat the point. See docs/PLAN.md, "Config-driven
+# strategy catalog".
+name: mean_reversion_bb
+
+engine:
+  lookback_bars: 60
+  swing_order: 3
+
+context:
+  piece: ma_trend
+  required: any
+  params:
+    fast: 20
+    slow: 50
+
+setup:
+  piece: mean_reversion
+  params:
+    window: 20
+    num_std: 2.0
+
+confirmations:
+  # Only requires roughly average-or-above participation on the bounce
+  # candle, not a strict buyer-dominant spike (min_bias: -1.0 always
+  # passes) — a proper oversold-RSI confirmation would need a dedicated
+  # piece (rsi_momentum here only checks "RSI above a floor", which is the
+  # wrong direction for mean reversion); left for a future addition.
+  - piece: volume
+    params:
+      window: 20
+      spike_threshold: 1.0
+      min_bias: -1.0
+
+risk:
+  stop:
+    piece: fixed_pct
+    params:
+      pct_below_reference: 1.0
+  target:
+    piece: risk_reward
+    params:
+      ratio: 1.5
+
+style:
+  max_holding_bars: 12
+  fee_pct: 0.1
+  initial_equity: 10000.0

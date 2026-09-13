@@ -36,6 +36,7 @@ class ResolvedStrategy:
     swing_order: int
     context_fn: Callable
     context_params: dict
+    required_context: str
     setup_fn: Callable
     setup_params: dict
     confirmations: list[ResolvedConfirmation]
@@ -73,6 +74,7 @@ def load_strategy(path: str | Path) -> ResolvedStrategy:
         swing_order=engine_cfg.get("swing_order", 3),
         context_fn=CONTEXT.get(context_cfg["piece"]),
         context_params=context_cfg.get("params", {}),
+        required_context=context_cfg.get("required", "uptrend"),
         setup_fn=SETUPS.get(setup_cfg["piece"]),
         setup_params=setup_cfg.get("params", {}),
         confirmations=confirmations,

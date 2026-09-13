@@ -1,0 +1,49 @@
+# Example catalog strategy #2: trend-following breakout instead of
+# pullback-to-support, confirmed by momentum (RSI + MACD) instead of
+# Fibonacci/candlestick. Demonstrates that the catalog actually composes —
+# see docs/PLAN.md, "Config-driven strategy catalog".
+name: breakout_momentum
+
+engine:
+  lookback_bars: 100
+  swing_order: 3
+
+context:
+  piece: ma_trend
+  required: uptrend
+  params:
+    fast: 20
+    slow: 50
+    method: ema
+
+setup:
+  piece: breakout
+  params:
+    lookback: 20
+
+confirmations:
+  - piece: rsi_momentum
+    params:
+      period: 14
+      min_rsi: 55
+  - piece: macd_momentum
+  - piece: volume
+    params:
+      window: 20
+      spike_threshold: 1.2
+      min_bias: 0.0
+
+risk:
+  stop:
+    piece: fixed_pct
+    params:
+      pct_below_reference: 1.0
+  target:
+    piece: risk_reward
+    params:
+      ratio: 2.0
+
+style:
+  max_holding_bars: 24
+  fee_pct: 0.1
+  initial_equity: 10000.0

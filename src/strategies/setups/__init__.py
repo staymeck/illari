@@ -1,1 +1,1 @@
-from src.strategies.setups import support_touch  # noqa: F401  (registers the piece)
+from src.strategies.setups import breakout, mean_reversion, support_touch  # noqa: F401  (registers the pieces)

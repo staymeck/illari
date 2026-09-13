@@ -11,6 +11,7 @@ engine:
 
 context:
   piece: dow_trend
+  required: uptrend
   params:
     order: 3
     lookback_swings: 2

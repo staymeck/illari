@@ -3,10 +3,14 @@ composed of a context piece, a setup piece, a list of confirmation pieces,
 and stop/target risk pieces.
 
 See docs/PLAN.md, "Config-driven strategy catalog". Long-only in this
-version — the resolved context piece is only ever checked against
-"uptrend", matching the one hardcoded strategy the engine ran before this
-generalization (see config/strategies/trend_pullback_fib.yaml, which
-reproduces it exactly for regression parity).
+version (entries always buy, never short) — but the required market regime
+IS configurable via `context.required` in the YAML (default "uptrend",
+matching the one hardcoded strategy the engine ran before this
+generalization — see config/strategies/trend_pullback_fib.yaml, which
+reproduces it exactly for regression parity). A mean-reversion strategy, for
+instance, sets `required: sideways` so it isn't gated behind an uptrend that
+range-bound setups don't need; `required: any` skips the context check
+entirely.
 
 Performance note: find_swing_points is computed exactly once for the whole
 series (vectorized, O(n)) instead of being recomputed from scratch on a
@@ -52,7 +56,7 @@ def _find_entry_signal(ctx: EvalContext, strategy: ResolvedStrategy) -> tuple | 
     reporting extras (e.g. support_level, fib_ratio, pattern, volume_bias) —
     which keys appear depends entirely on which pieces the config includes."""
     trend = strategy.context_fn(ctx, strategy.context_params)
-    if trend != "uptrend":
+    if strategy.required_context != "any" and trend != strategy.required_context:
         return None
 
     setup = strategy.setup_fn(ctx, strategy.setup_params)
