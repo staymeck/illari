@@ -100,6 +100,21 @@ will be evaluated later as a possible entry filter.
    source of concrete rules when implementing each component.
    (`resources/Mercado_analisi.pdf` is a generic market-study/marketing
    textbook excerpt, not relevant to this technical part — archived unused.)
+6. `resources/18-Patrones-de-velas-que-debes-conocer.pdf` — a candlestick
+   pattern reference (18 named patterns: 8 bearish, 8 bullish, 2 neutral/
+   doji). Checked `src/analysis/candles.py` against it directly:
+   open/close/high/low + color (bullish = close > open) were already the
+   basis for every function there from the start (`body`, `upper_wick`,
+   `lower_wick`, `is_bullish`/`is_bearish`) — this part was never missing.
+   What the cross-check did surface: the module only recognizes 4 of the
+   18 named patterns (hammer, bullish engulfing, shooting star, bearish
+   engulfing) — `is_doji` exists but isn't wired into either pattern
+   function, no 3-candle pattern (morning/evening star, three white
+   soldiers, three black crows) is implemented, and no "bearish
+   candlestick" confirmation piece is registered even though
+   `bearish_reversal_pattern` exists (the current strategy family is
+   long/uptrend-only). Left as-is pending a decision on whether to extend
+   the catalog — see docs/PLAN.md open items / Bitácora Illari.
 
 ### Additional data sources (all free, already evaluated)
 
