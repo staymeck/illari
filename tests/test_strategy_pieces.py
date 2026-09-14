@@ -22,6 +22,7 @@ from src.strategies.context.probability_trend import probability_trend
 from src.strategies.risk.atr_stop import atr_stop
 from src.strategies.risk.fixed_pct import fixed_pct_stop, risk_reward_target
 from src.strategies.risk.regime_adaptive_stop import regime_adaptive_stop
+from src.strategies.risk.structural_stop import structural_stop
 from src.strategies.setups.breakout import breakout
 from src.strategies.setups.mean_reversion import mean_reversion
 from src.strategies.setups.scheduled_entry import scheduled_entry
@@ -324,6 +325,55 @@ def test_atr_stop_piece_falls_back_when_not_enough_data():
     stop = atr_stop(entry_price=110.0, setup=setup, ctx=ctx, params={"period": 14})
 
     assert stop == 110.0 * 0.995
+
+
+def test_structural_stop_uses_the_nearest_real_support_below_entry():
+    # Confirmed swing lows at 95 and 97 (order=1); entry sits just above
+    # both -> should anchor to the closer one (97), not an arbitrary %.
+    df = _candles([{"open": c, "close": c} for c in [100, 95, 100, 97, 99]])
+    ctx = _ctx(df, order=1)
+    setup = SetupResult(reference_level=97.0)
+
+    stop = structural_stop(entry_price=99.0, setup=setup, ctx=ctx, params={})
+
+    assert stop == pytest.approx(97.0 * 0.999)  # default buffer_pct=0.1
+
+
+def test_structural_stop_prefers_a_closer_fibonacci_level_over_a_farther_support():
+    # A clean up-leg (swing low 10 -> swing high 20) gives Fibonacci levels
+    # between them; entry at 15.5 sits right above the 50% level (15.0),
+    # which is closer than the only support level (10).
+    df = _candles([{"open": c, "close": c} for c in [20, 10, 20, 15]])
+    ctx = _ctx(df, order=1)
+    setup = SetupResult(reference_level=10.0)
+
+    stop = structural_stop(entry_price=15.5, setup=setup, ctx=ctx, params={})
+
+    assert stop == pytest.approx(15.0 * 0.999)
+
+
+def test_structural_stop_falls_back_when_nothing_real_sits_below_entry():
+    df = _candles([{"open": c, "close": c} for c in [10, 5, 10]])
+    ctx = _ctx(df, order=1)
+    setup = SetupResult(reference_level=5.0)
+
+    # entry_price (3.0) is below every known level -> nothing to anchor to.
+    stop = structural_stop(entry_price=3.0, setup=setup, ctx=ctx, params={})
+
+    assert stop == pytest.approx(3.0 * 0.995)  # default fallback_pct=0.5
+
+
+def test_structural_stop_falls_back_when_nearest_level_is_too_far():
+    df = _candles([{"open": c, "close": c} for c in [100, 95, 100, 97, 99]])
+    ctx = _ctx(df, order=1)
+    setup = SetupResult(reference_level=97.0)
+
+    # Same setup as the first test, but max_stop_pct is tightened past the
+    # ~2.1% distance to the real level -> falls back instead of accepting
+    # a level that violates the caller's own risk ceiling.
+    stop = structural_stop(entry_price=99.0, setup=setup, ctx=ctx, params={"max_stop_pct": 1.0})
+
+    assert stop == pytest.approx(99.0 * 0.995)
 
 
 def test_adx_strength_confirmation_piece_passes_on_strong_trend():

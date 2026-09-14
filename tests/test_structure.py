@@ -4,7 +4,9 @@ import pandas as pd
 
 from src.analysis.structure import (
     classify_trend,
+    confluence_count,
     find_swing_points,
+    nearest_support_below,
     support_resistance_levels,
 )
 
@@ -67,3 +69,27 @@ def test_support_resistance_merges_nearby_levels():
 
     assert len(levels["support"]) == 1
     assert 3.0 <= levels["support"][0] <= 3.01
+
+
+def test_nearest_support_below_picks_the_highest_level_under_price():
+    assert nearest_support_below(100, [80, 90, 95, 105]) == 95
+
+
+def test_nearest_support_below_none_when_everything_is_above():
+    assert nearest_support_below(100, [105, 110]) is None
+
+
+def test_nearest_support_below_empty_levels():
+    assert nearest_support_below(100, []) is None
+
+
+def test_confluence_count_counts_groups_with_a_nearby_level():
+    supports = [95.0, 80.0]
+    fib_levels = [95.3, 70.0]
+
+    # 95 has a near match in both groups (95.0 and 95.3, within 1%).
+    assert confluence_count(95.0, supports, fib_levels, tolerance_pct=1.0) == 2
+    # 80 only matches the supports group.
+    assert confluence_count(80.0, supports, fib_levels, tolerance_pct=1.0) == 1
+    # An isolated level with no nearby match in either group.
+    assert confluence_count(50.0, supports, fib_levels, tolerance_pct=1.0) == 0

@@ -102,3 +102,31 @@ def support_resistance_levels(
     supports = _cluster(marked.loc[marked["is_swing_low"], "low"])
     resistances = _cluster(marked.loc[marked["is_swing_high"], "high"])
     return {"support": supports, "resistance": resistances}
+
+
+def nearest_support_below(price: float, levels: list[float]) -> float | None:
+    """The highest level in `levels` that sits below `price` — i.e. the
+    next real structural floor price would have to fall through — or None
+    if every level is at or above `price`.
+
+    Deliberately generic: `levels` can be support pivots, Fibonacci
+    retracement prices, or both combined — this just picks the nearest one
+    down, wherever it came from. Used by risk/structural_stop.py to place a
+    stop at a real level instead of an arbitrary fixed percentage."""
+    candidates = [level for level in levels if level < price]
+    return max(candidates) if candidates else None
+
+
+def confluence_count(level: float, *level_groups: list[float], tolerance_pct: float = 0.5) -> int:
+    """How many of the given `level_groups` (e.g. support pivots, Fibonacci
+    levels — pass each as a separate list) have at least one level within
+    `tolerance_pct`% of `level`. A rough, purely geometric proxy for how
+    much independent structural agreement — "liquidity" in the sense of
+    real prior interest, not order-book depth we don't have — sits at that
+    price: a level only one source points to is easier for price to cut
+    through than one several sources agree on."""
+    count = 0
+    for levels in level_groups:
+        if any(abs(other - level) / level * 100 <= tolerance_pct for other in levels):
+            count += 1
+    return count
