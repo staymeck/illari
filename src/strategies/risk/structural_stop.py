@@ -18,6 +18,18 @@ interest ("liquidity") is likely to sit there versus an isolated line price
 could cut through easily. Not wired into this piece's return value (the
 RISK_STOPS contract is a single float, like every other stop piece) but
 directly reusable for trade-audit reporting — see docs/PLAN.md.
+
+`buffer_pct` vs. `max_stop_pct`, a real interaction to know about: since
+support_touch already requires entry within ~1% of the SAME level this
+piece then anchors to, a small buffer_pct produces a very tight stop (more
+exposure to ordinary noise, not a wider "safer" one). Conversely, as
+buffer_pct approaches max_stop_pct, every real level's stop distance starts
+exceeding the ceiling and the fallback branch fires on nearly every trade —
+silently degenerating into a fixed-percentage stop and defeating the whole
+point of this piece. A swept comparison across all 5 markets found
+buffer_pct=2.0 (with the default max_stop_pct=5.0) the best point in range
+0.1-7.0 — see config/strategies/trend_pullback_htf_structural_stop.yaml's
+header comment for the full numbers and the overfitting caveat.
 """
 from __future__ import annotations
 
