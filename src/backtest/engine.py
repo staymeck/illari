@@ -83,7 +83,11 @@ def _find_entry_signal(ctx: EvalContext, strategy: ResolvedStrategy) -> tuple | 
     """Runs the strategy's context -> setup -> confirmations chain. Returns
     `(setup, extras)` on a full match, or None. `extras` merges every piece's
     reporting extras (e.g. support_level, fib_ratio, pattern, volume_bias) —
-    which keys appear depends entirely on which pieces the config includes."""
+    which keys appear depends entirely on which pieces the config includes.
+    Always includes `context_trend`: the context layer's own determination
+    (e.g. "uptrend") — previously computed only to gate entry and then
+    discarded, so a trade record couldn't say what called the trend at the
+    time (see docs/PLAN.md / Bitácora Illari, trade-audit discussion)."""
     trend = strategy.context_fn(ctx, strategy.context_params)
     if strategy.required_context != "any" and trend != strategy.required_context:
         return None
@@ -93,6 +97,7 @@ def _find_entry_signal(ctx: EvalContext, strategy: ResolvedStrategy) -> tuple | 
         return None
 
     extras = dict(setup.extras)
+    extras["context_trend"] = trend
     for confirmation in strategy.confirmations:
         result = confirmation.fn(ctx, confirmation.params)
         if result is None:
