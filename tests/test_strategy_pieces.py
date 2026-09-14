@@ -377,6 +377,26 @@ def test_structural_stop_falls_back_when_nearest_level_is_too_far():
     assert stop == pytest.approx(99.0 * 0.995)
 
 
+def test_structural_stop_higher_timeframe_confluence_enables_min_confluence_2():
+    # Same data as the first test, but fib is absent (no completed up-leg)
+    # so support alone only self-confirms (confluence=1) - min_confluence=2
+    # finds nothing without a second source and falls back...
+    df = _candles([{"open": c, "close": c} for c in [100, 95, 100, 97, 99]])
+    ctx_no_htf = _ctx(df, order=1)
+    setup = SetupResult(reference_level=97.0)
+
+    stop_without = structural_stop(entry_price=99.0, setup=setup, ctx=ctx_no_htf, params={"min_confluence": 2})
+    assert stop_without == pytest.approx(99.0 * 0.995)  # default fallback_pct=0.5
+
+    # ...but a higher-timeframe support at the SAME level (97) is a second,
+    # independent source -> now it clears min_confluence=2.
+    higher_tf_df = _candles([{"open": c, "close": c} for c in [100, 97, 100]])
+    ctx_with_htf = EvalContext(price_window=df, marked_window=ctx_no_htf.marked_window, higher_tf_window=higher_tf_df)
+
+    stop_with = structural_stop(entry_price=99.0, setup=setup, ctx=ctx_with_htf, params={"min_confluence": 2, "order": 1})
+    assert stop_with == pytest.approx(97.0 * 0.999)  # default buffer_pct=0.1
+
+
 def test_structural_target_uses_the_nearest_real_resistance_above_entry():
     # Confirmed swing high at 105, swing low at 97; entry pulled back to 99.
     df = _candles([{"open": c, "close": c} for c in [100, 105, 100, 97, 99]])
@@ -418,6 +438,20 @@ def test_structural_target_falls_back_when_reward_risk_is_too_poor():
     target = structural_target(entry_price=99.0, stop_price=90.0, ctx=ctx, params={})
 
     assert target == pytest.approx(99.0 + 2.0 * 9.0)
+
+
+def test_structural_target_higher_timeframe_confluence_enables_min_confluence_2():
+    df = _candles([{"open": c, "close": c} for c in [100, 105, 100, 97, 99]])
+    ctx_no_htf = _ctx(df, order=1)
+
+    target_without = structural_target(entry_price=99.0, stop_price=97.0, ctx=ctx_no_htf, params={"min_confluence": 2})
+    assert target_without == pytest.approx(99.0 + 2.0 * 2.0)  # default fallback_ratio=2.0, risk=2.0
+
+    higher_tf_df = _candles([{"open": c, "close": c} for c in [100, 105, 100]])
+    ctx_with_htf = EvalContext(price_window=df, marked_window=ctx_no_htf.marked_window, higher_tf_window=higher_tf_df)
+
+    target_with = structural_target(entry_price=99.0, stop_price=97.0, ctx=ctx_with_htf, params={"min_confluence": 2, "order": 1})
+    assert target_with == pytest.approx(105.0 * 0.999)  # default buffer_pct=0.1
 
 
 def test_adx_strength_confirmation_piece_passes_on_strong_trend():

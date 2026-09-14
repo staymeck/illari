@@ -24,8 +24,11 @@ prior high — this is why it never beat a plain fixed risk-multiple target
 filtering — preserves that original behavior unless a caller opts in) is
 the fix: via src.analysis.structure.nearest_confluent_level, at 2 it skips
 a lone, single-source ceiling in favor of the next one out that's also
-backed by an independent source (a resistance pivot AND a Fibonacci
-level).
+backed by an independent source. Same third source as structural_stop.py
+is available here for `min_confluence=3`: the higher timeframe's own
+resistance (only populated when the engine was given `higher_tf_df`;
+without it, that source is empty and `min_confluence=3` is impossible to
+satisfy — see structural_stop.py's docstring for the full note).
 """
 from __future__ import annotations
 
@@ -57,10 +60,16 @@ def structural_target(entry_price: float, stop_price: float, ctx: EvalContext, p
         fib_levels = list(retracement_levels(leg["low"], leg["high"]).values())
         resistance_levels = resistance_levels + [leg["high"]]  # the leg's own high is a resistance too
 
+    higher_tf_levels: list[float] = []
+    if ctx.higher_tf_window is not None and not ctx.higher_tf_window.empty:
+        higher_tf_levels = support_resistance_levels(
+            ctx.higher_tf_window, order=order, tolerance_pct=tolerance_pct
+        )["resistance"]
+
     level = nearest_confluent_level(
         entry_price,
-        resistance_levels + fib_levels,
-        confluence_groups=(resistance_levels, fib_levels),
+        resistance_levels + fib_levels + higher_tf_levels,
+        confluence_groups=(resistance_levels, fib_levels, higher_tf_levels),
         direction="above",
         min_confluence=min_confluence,
         tolerance_pct=tolerance_pct,

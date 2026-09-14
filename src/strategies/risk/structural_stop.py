@@ -13,13 +13,18 @@ breaks this level, there's no known structure catching it here).
 
 `min_confluence` (default 1, i.e. no filtering — preserves the original
 behavior unless a caller opts in): how many independent structural signals
-(a support cluster AND a Fibonacci level) must agree near a candidate level
-before it's trusted as the stop, via
+must agree near a candidate level before it's trusted as the stop, via
 src.analysis.structure.nearest_confluent_level. At 1, the nearest level is
-used no matter its source, same as before; at 2, a lone, noise-level pivot
-with nothing else backing it is skipped in favor of the next real level
-further out — a rough proxy for "liquidity" (real prior interest) versus a
-line price could cut through easily.
+used no matter its source, same as before. There are three independent
+sources available, so up to `min_confluence=3` is meaningful: a support
+cluster on the traded timeframe, a Fibonacci level, and — only when the
+engine was given `higher_tf_df` — a support cluster on the HIGHER
+timeframe's own candles (e.g. daily support while trading 1h), a
+genuinely independent read since it comes from a coarser, unrelated
+swing structure rather than the same 1h data sliced two ways. Without
+`higher_tf_df`, that third source is simply empty and never contributes,
+so `min_confluence=3` would then be impossible to satisfy (falls back on
+every trade) — a real thing to be aware of, not a silent gap.
 
 `buffer_pct` vs. `max_stop_pct`, a real interaction to know about: since
 support_touch already requires entry within ~1% of the SAME level this
@@ -59,10 +64,16 @@ def structural_stop(entry_price: float, setup: SetupResult, ctx: EvalContext, pa
     if leg is not None:
         fib_levels = list(retracement_levels(leg["low"], leg["high"]).values())
 
+    higher_tf_levels: list[float] = []
+    if ctx.higher_tf_window is not None and not ctx.higher_tf_window.empty:
+        higher_tf_levels = support_resistance_levels(
+            ctx.higher_tf_window, order=order, tolerance_pct=tolerance_pct
+        )["support"]
+
     level = nearest_confluent_level(
         entry_price,
-        support_levels + fib_levels,
-        confluence_groups=(support_levels, fib_levels),
+        support_levels + fib_levels + higher_tf_levels,
+        confluence_groups=(support_levels, fib_levels, higher_tf_levels),
         direction="below",
         min_confluence=min_confluence,
         tolerance_pct=tolerance_pct,
