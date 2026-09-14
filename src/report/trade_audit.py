@@ -81,7 +81,11 @@ def pattern_breakdown(trades: pd.DataFrame) -> pd.DataFrame:
                 "avg_pnl_pct": round(group["pnl_pct"].mean(), 3),
                 "stop_pct": round(100 * (group["exit_reason"] == "stop").mean(), 1),
                 "target_pct": round(100 * (group["exit_reason"] == "target").mean(), 1),
-                "max_holding_pct": round(100 * (group["exit_reason"] == "max_holding_bars").mean(), 1),
+                # "timeout" (see src/backtest/engine.py's _walk_to_exit) —
+                # was wrongly checked against "max_holding_bars" here, a
+                # string the engine never actually produces, so this column
+                # silently read 0.0% for every pattern until now.
+                "timeout_pct": round(100 * (group["exit_reason"] == "timeout").mean(), 1),
             }
         )
     return pd.DataFrame(rows).sort_values("avg_pnl_pct", ascending=False).reset_index(drop=True)
