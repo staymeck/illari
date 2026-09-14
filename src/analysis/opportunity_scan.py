@@ -24,6 +24,7 @@ used to enter a live trade - only to describe the data.
 from __future__ import annotations
 
 import pandas as pd
+from scipy.signal import find_peaks
 
 
 def compute_mfe(df: pd.DataFrame, horizon_bars: int) -> pd.DataFrame:
@@ -79,3 +80,47 @@ def opportunity_rate(df: pd.DataFrame, horizon_bars: int, threshold_pct: float) 
         "mean_mfe_short_pct": round(mfe["mfe_short_pct"].mean(), 3),
         "median_mfe_short_pct": round(mfe["mfe_short_pct"].median(), 3),
     }
+
+
+def find_ideal_trades(
+    df: pd.DataFrame, horizon_bars: int, threshold_pct: float, min_distance_bars: int
+) -> pd.DataFrame:
+    """A sparse, plottable version of the oracle scan. `opportunity_rate`
+    flags nearly every bar at a low threshold (adjacent bars share almost
+    the same forward window, so hits cluster into one continuous smear) -
+    not useful to draw on a chart. This instead finds local PEAKS in the MFE
+    series at least `min_distance_bars` apart: one marker per genuinely
+    distinct opportunity, in each direction, with the actual best entry/exit
+    price and time so it can be drawn as a round trip.
+
+    Returns a DataFrame with one row per ideal trade: direction ("long" or
+    "short"), entry_time/entry_price, exit_time/exit_price, mfe_pct.
+    """
+    df = df.reset_index(drop=True)
+    mfe = compute_mfe(df, horizon_bars).reset_index(drop=True)
+
+    records = []
+    for direction, mfe_col, price_col, pick in [
+        ("long", "mfe_long_pct", "high", "idxmax"),
+        ("short", "mfe_short_pct", "low", "idxmin"),
+    ]:
+        peak_positions, _ = find_peaks(
+            mfe[mfe_col].to_numpy(), height=threshold_pct, distance=min_distance_bars
+        )
+        for pos in peak_positions:
+            window = df.iloc[pos + 1 : pos + 1 + horizon_bars]
+            if window.empty:
+                continue
+            exit_pos = window[price_col].idxmax() if pick == "idxmax" else window[price_col].idxmin()
+            records.append(
+                {
+                    "direction": direction,
+                    "entry_time": df["timestamp"].iloc[pos],
+                    "entry_price": df["close"].iloc[pos],
+                    "exit_time": df["timestamp"].loc[exit_pos],
+                    "exit_price": df[price_col].loc[exit_pos],
+                    "mfe_pct": round(float(mfe[mfe_col].iloc[pos]), 3),
+                }
+            )
+
+    return pd.DataFrame(records)

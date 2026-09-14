@@ -2,7 +2,12 @@
 expected (markers, legend labels), not a visual/pixel snapshot."""
 import pandas as pd
 
-from src.report.chart import render_entries_chart, write_entries_chart
+from src.report.chart import (
+    render_entries_chart,
+    render_opportunity_chart,
+    write_entries_chart,
+    write_opportunity_chart,
+)
 
 
 def _candles(n: int = 5) -> pd.DataFrame:
@@ -61,3 +66,52 @@ def test_write_entries_chart_writes_expected_file(tmp_path):
     assert out_path == tmp_path / "btc-usdt_1h_entries_chart.html"
     assert out_path.exists()
     assert "BTC" in out_path.read_text(encoding="utf-8")
+
+
+def _real_trades(entry_time, exit_time) -> pd.DataFrame:
+    return pd.DataFrame({
+        "entry_time": [entry_time], "entry_price": [100.0],
+        "exit_time": [exit_time], "exit_price": [102.0],
+        "pnl_pct": [1.8], "exit_reason": ["target"],
+    })
+
+
+def _ideal_trades(entry_time, exit_time, direction="long") -> pd.DataFrame:
+    return pd.DataFrame({
+        "direction": [direction], "entry_time": [entry_time], "entry_price": [100.0],
+        "exit_time": [exit_time], "exit_price": [105.0], "mfe_pct": [5.0],
+    })
+
+
+def test_render_opportunity_chart_includes_real_and_ideal_legend_entries():
+    df = _candles()
+    real = _real_trades(df["timestamp"].iloc[1], df["timestamp"].iloc[3])
+    ideal = pd.concat([
+        _ideal_trades(df["timestamp"].iloc[0], df["timestamp"].iloc[2], "long"),
+        _ideal_trades(df["timestamp"].iloc[1], df["timestamp"].iloc[4], "short"),
+    ])
+
+    html = render_opportunity_chart(df, real, ideal, "BTC/USDT", "1h")
+
+    assert "real entry" in html and "real exit" in html
+    assert "ideal long entry" in html and "ideal short entry" in html
+
+
+def test_render_opportunity_chart_handles_empty_inputs():
+    df = _candles()
+
+    html = render_opportunity_chart(df, pd.DataFrame(), pd.DataFrame(), "BTC/USDT", "1h")
+
+    assert "real entry" not in html
+    assert "ideal long entry" not in html
+    assert "BTC" in html
+
+
+def test_write_opportunity_chart_writes_expected_file(tmp_path):
+    df = _candles()
+    real = _real_trades(df["timestamp"].iloc[1], df["timestamp"].iloc[3])
+
+    out_path = write_opportunity_chart(df, real, pd.DataFrame(), "BTC/USDT", "1h", reports_dir=tmp_path)
+
+    assert out_path == tmp_path / "btc-usdt_1h_opportunity_vs_reality.html"
+    assert out_path.exists()
