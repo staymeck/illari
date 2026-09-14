@@ -9,7 +9,7 @@ import pytest
 
 from src.analysis.structure import find_swing_points
 from src.strategies.confirmations.adx_strength import adx_strength
-from src.strategies.confirmations.candlestick import candlestick
+from src.strategies.confirmations.candlestick import bearish_candlestick, candlestick
 from src.strategies.confirmations.fibonacci import fibonacci_confluence
 from src.strategies.confirmations.macd_momentum import macd_momentum
 from src.strategies.confirmations.rsi_momentum import rsi_momentum
@@ -118,6 +118,26 @@ def test_candlestick_confirmation_piece_none_for_plain_candle():
     df = _candles([{"open": 10, "close": 10.2, "high": 10.5, "low": 9.5}])
 
     assert candlestick(_ctx(df), {}) is None
+
+
+def test_bearish_candlestick_confirmation_piece_detects_shooting_star():
+    df = _candles(
+        [
+            {"open": 9, "close": 8.5, "high": 9.1, "low": 8},
+            {"open": 10, "close": 9, "high": 15, "low": 9.9},  # shooting star
+        ]
+    )
+
+    result = bearish_candlestick(_ctx(df), {})
+
+    assert result is not None
+    assert result.extras["pattern"] == "shooting_star"
+
+
+def test_bearish_candlestick_confirmation_piece_none_for_plain_candle():
+    df = _candles([{"open": 10, "close": 10.2, "high": 10.5, "low": 9.5}])
+
+    assert bearish_candlestick(_ctx(df), {}) is None
 
 
 def test_volume_confirmation_piece_true_when_spike_and_buyer_dominant():
