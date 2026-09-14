@@ -1,0 +1,69 @@
+# Stage 2A of the experiment protocol (Bitácora Illari): identical to the
+# frozen baseline (trend_pullback_htf_confluence.yaml) plus ONE addition,
+# lower_tf_rejection — the most recently closed 5m candle (as of the 1h
+# bar's own close) must itself be a hammer-shaped rejection. Evaluated once
+# at the existing 1h-close decision point, not continuously — execution
+# timing is unchanged. Needs the caller to pass lower_tf_df (5m) in
+# addition to higher_tf_df (1d) — this YAML alone doesn't fetch it.
+name: trend_pullback_htf_confluence_5m_rejection
+
+engine:
+  lookback_bars: 200
+  swing_order: 3
+
+context:
+  piece: dow_trend
+  required: uptrend
+  params:
+    order: 3
+    lookback_swings: 2
+
+setup:
+  piece: support_touch
+  params:
+    order: 3
+    tolerance_pct: 1.0
+
+confirmations:
+  - piece: higher_tf_trend
+    params:
+      required: uptrend
+      order: 3
+      lookback_swings: 2
+  - piece: fibonacci
+    params:
+      order: 3
+      tolerance_pct: 1.0
+  - piece: candlestick
+  - piece: volume
+    params:
+      window: 20
+      spike_threshold: 1.2
+      min_bias: 0.1
+  - piece: lower_tf_rejection
+    params:
+      lower_wick_min_ratio: 2.0
+      upper_wick_max_ratio: 0.3
+
+risk:
+  stop:
+    piece: structural_stop
+    params:
+      tolerance_pct: 0.5
+      buffer_pct: 2.0
+      max_stop_pct: 5.0
+      fallback_pct: 0.5
+      min_confluence: 2
+  target:
+    piece: structural_target
+    params:
+      tolerance_pct: 0.5
+      buffer_pct: 0.1
+      min_risk_reward: 1.0
+      fallback_ratio: 2.0
+      min_confluence: 2
+
+style:
+  max_holding_bars: 24
+  fee_pct: 0.1
+  initial_equity: 10000.0
