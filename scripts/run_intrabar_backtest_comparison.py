@@ -73,6 +73,11 @@ def main() -> None:
         print(f"\n{label} pooled significance: n={sig['n_trades']}, observed win rate={sig['observed_win_rate']}%, "
               f"breakeven={sig['breakeven_win_rate']}%, 95% CI=[{sig['ci_95_low']}%, {sig['ci_95_high']}%], "
               f"breakeven inside CI? {sig['breakeven_inside_ci']}")
+        # Saved for a follow-up deep-dive (stop distance, premature-stop
+        # rate, etc.) without re-running this whole comparison again.
+        out_path = Path("/tmp/claude-1000/-home-lpazc-Documentos-Proyects-illari/b6480f7b-8c87-4d41-b380-c0b960cba666/scratchpad") / f"{label}_trades.parquet"
+        pooled.to_parquet(out_path)
+        print(f"saved: {out_path}")
 
 
 if __name__ == "__main__":
