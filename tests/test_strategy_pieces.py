@@ -23,6 +23,7 @@ from src.strategies.risk.atr_stop import atr_stop
 from src.strategies.risk.fixed_pct import fixed_pct_stop, risk_reward_target
 from src.strategies.risk.regime_adaptive_stop import regime_adaptive_stop
 from src.strategies.risk.structural_stop import structural_stop
+from src.strategies.risk.structural_target import structural_target
 from src.strategies.setups.breakout import breakout
 from src.strategies.setups.mean_reversion import mean_reversion
 from src.strategies.setups.scheduled_entry import scheduled_entry
@@ -374,6 +375,49 @@ def test_structural_stop_falls_back_when_nearest_level_is_too_far():
     stop = structural_stop(entry_price=99.0, setup=setup, ctx=ctx, params={"max_stop_pct": 1.0})
 
     assert stop == pytest.approx(99.0 * 0.995)
+
+
+def test_structural_target_uses_the_nearest_real_resistance_above_entry():
+    # Confirmed swing high at 105, swing low at 97; entry pulled back to 99.
+    df = _candles([{"open": c, "close": c} for c in [100, 105, 100, 97, 99]])
+    ctx = _ctx(df, order=1)
+
+    target = structural_target(entry_price=99.0, stop_price=97.0, ctx=ctx, params={})
+
+    assert target == pytest.approx(105.0 * 0.999)  # default buffer_pct=0.1
+
+
+def test_structural_target_prefers_a_closer_fibonacci_level_over_a_farther_resistance():
+    # Same up-leg as the structural_stop fibonacci test (low 10 -> high 20);
+    # entry at 13.5 sits right below the 78.6% level (13.82), closer than
+    # the leg's own high (20).
+    df = _candles([{"open": c, "close": c} for c in [20, 10, 20, 15]])
+    ctx = _ctx(df, order=1)
+
+    target = structural_target(entry_price=13.5, stop_price=13.3, ctx=ctx, params={})
+
+    assert target == pytest.approx(13.82 * 0.999)
+
+
+def test_structural_target_falls_back_when_nothing_real_sits_above_entry():
+    df = _candles([{"open": c, "close": c} for c in [100, 105, 100, 97, 99]])
+    ctx = _ctx(df, order=1)
+
+    # entry_price (110) is above every known level -> nothing to anchor to.
+    target = structural_target(entry_price=110.0, stop_price=105.0, ctx=ctx, params={})
+
+    assert target == pytest.approx(110.0 + 2.0 * 5.0)  # default fallback_ratio=2.0
+
+
+def test_structural_target_falls_back_when_reward_risk_is_too_poor():
+    df = _candles([{"open": c, "close": c} for c in [100, 105, 100, 97, 99]])
+    ctx = _ctx(df, order=1)
+
+    # Same 105 resistance as the first test, but the stop is far enough
+    # away (90.0) that the real ceiling doesn't clear a 1:1 reward:risk.
+    target = structural_target(entry_price=99.0, stop_price=90.0, ctx=ctx, params={})
+
+    assert target == pytest.approx(99.0 + 2.0 * 9.0)
 
 
 def test_adx_strength_confirmation_piece_passes_on_strong_trend():

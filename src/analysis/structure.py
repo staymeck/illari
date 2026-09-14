@@ -117,6 +117,16 @@ def nearest_support_below(price: float, levels: list[float]) -> float | None:
     return max(candidates) if candidates else None
 
 
+def nearest_resistance_above(price: float, levels: list[float]) -> float | None:
+    """Mirror image of nearest_support_below: the lowest level in `levels`
+    that sits above `price` — the next real structural ceiling price would
+    have to break through — or None if every level is at or below `price`.
+    Used by risk/structural_target.py to place a take-profit at a real
+    level instead of an arbitrary risk-multiple."""
+    candidates = [level for level in levels if level > price]
+    return min(candidates) if candidates else None
+
+
 def confluence_count(level: float, *level_groups: list[float], tolerance_pct: float = 0.5) -> int:
     """How many of the given `level_groups` (e.g. support pivots, Fibonacci
     levels — pass each as a separate list) have at least one level within

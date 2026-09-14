@@ -6,6 +6,7 @@ from src.analysis.structure import (
     classify_trend,
     confluence_count,
     find_swing_points,
+    nearest_resistance_above,
     nearest_support_below,
     support_resistance_levels,
 )
@@ -81,6 +82,14 @@ def test_nearest_support_below_none_when_everything_is_above():
 
 def test_nearest_support_below_empty_levels():
     assert nearest_support_below(100, []) is None
+
+
+def test_nearest_resistance_above_picks_the_lowest_level_over_price():
+    assert nearest_resistance_above(100, [80, 105, 110, 95]) == 105
+
+
+def test_nearest_resistance_above_none_when_everything_is_below():
+    assert nearest_resistance_above(100, [80, 90]) is None
 
 
 def test_confluence_count_counts_groups_with_a_nearby_level():
