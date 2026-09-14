@@ -140,3 +140,37 @@ def confluence_count(level: float, *level_groups: list[float], tolerance_pct: fl
         if any(abs(other - level) / level * 100 <= tolerance_pct for other in levels):
             count += 1
     return count
+
+
+def nearest_confluent_level(
+    price: float,
+    candidates: list[float],
+    confluence_groups: tuple[list[float], ...],
+    direction: str,
+    min_confluence: int = 1,
+    tolerance_pct: float = 0.5,
+) -> float | None:
+    """Like nearest_support_below / nearest_resistance_above, but walks
+    outward past any candidate that doesn't have at least `min_confluence`
+    independent `confluence_groups` agreeing near it (see confluence_count)
+    — skipping a noise-level, single-source level (e.g. a small bump inside
+    a retracement's own back-and-forth) to find one with real backing,
+    instead of anchoring to whichever happens to be nearest.
+
+    `direction`: "below" walks downward (nearest first), "above" walks
+    upward (nearest first). `min_confluence=1` never filters anything — a
+    candidate drawn from one of `confluence_groups` always self-matches
+    that group — so it reproduces nearest_support_below /
+    nearest_resistance_above exactly; `min_confluence=2` requires genuine
+    cross-confirmation from a second, independent source."""
+    if direction == "below":
+        ordered = sorted((c for c in candidates if c < price), reverse=True)
+    elif direction == "above":
+        ordered = sorted(c for c in candidates if c > price)
+    else:
+        raise ValueError(f"direction must be 'below' or 'above', got {direction!r}")
+
+    for level in ordered:
+        if confluence_count(level, *confluence_groups, tolerance_pct=tolerance_pct) >= min_confluence:
+            return level
+    return None

@@ -11,13 +11,15 @@ a trade is taken — that's still entirely up to context/setup/confirmations
 same geometry the entry itself relied on ("punto de equilibrio": if price
 breaks this level, there's no known structure catching it here).
 
-See src/analysis/structure.py's confluence_count for a companion measure —
-how many independent structural signals (a support cluster AND a Fibonacci
-level) agree near the chosen stop, a rough proxy for how much real prior
-interest ("liquidity") is likely to sit there versus an isolated line price
-could cut through easily. Not wired into this piece's return value (the
-RISK_STOPS contract is a single float, like every other stop piece) but
-directly reusable for trade-audit reporting — see docs/PLAN.md.
+`min_confluence` (default 1, i.e. no filtering — preserves the original
+behavior unless a caller opts in): how many independent structural signals
+(a support cluster AND a Fibonacci level) must agree near a candidate level
+before it's trusted as the stop, via
+src.analysis.structure.nearest_confluent_level. At 1, the nearest level is
+used no matter its source, same as before; at 2, a lone, noise-level pivot
+with nothing else backing it is skipped in favor of the next real level
+further out — a rough proxy for "liquidity" (real prior interest) versus a
+line price could cut through easily.
 
 `buffer_pct` vs. `max_stop_pct`, a real interaction to know about: since
 support_touch already requires entry within ~1% of the SAME level this
@@ -34,7 +36,7 @@ header comment for the full numbers and the overfitting caveat.
 from __future__ import annotations
 
 from src.analysis.fibonacci import latest_up_leg, retracement_levels
-from src.analysis.structure import nearest_support_below, support_resistance_levels
+from src.analysis.structure import nearest_confluent_level, support_resistance_levels
 from src.strategies.registry import RISK_STOPS
 from src.strategies.types import EvalContext, SetupResult
 
@@ -46,6 +48,7 @@ def structural_stop(entry_price: float, setup: SetupResult, ctx: EvalContext, pa
     buffer_pct = params.get("buffer_pct", 0.1)
     max_stop_pct = params.get("max_stop_pct", 5.0)
     fallback_pct = params.get("fallback_pct", 0.5)
+    min_confluence = params.get("min_confluence", 1)
 
     support_levels = support_resistance_levels(
         ctx.marked_window, order=order, tolerance_pct=tolerance_pct, marked=ctx.marked_window
@@ -56,7 +59,14 @@ def structural_stop(entry_price: float, setup: SetupResult, ctx: EvalContext, pa
     if leg is not None:
         fib_levels = list(retracement_levels(leg["low"], leg["high"]).values())
 
-    level = nearest_support_below(entry_price, support_levels + fib_levels)
+    level = nearest_confluent_level(
+        entry_price,
+        support_levels + fib_levels,
+        confluence_groups=(support_levels, fib_levels),
+        direction="below",
+        min_confluence=min_confluence,
+        tolerance_pct=tolerance_pct,
+    )
 
     # No real structure below entry at all (a void, or not enough history
     # yet) — fall back to a tight, conservative default rather than no

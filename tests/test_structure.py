@@ -1,11 +1,13 @@
 """Tests on synthetic data for src/analysis/structure.py — cases where the
 expected result is known in advance (see docs/PLAN.md, Verification)."""
 import pandas as pd
+import pytest
 
 from src.analysis.structure import (
     classify_trend,
     confluence_count,
     find_swing_points,
+    nearest_confluent_level,
     nearest_resistance_above,
     nearest_support_below,
     support_resistance_levels,
@@ -90,6 +92,61 @@ def test_nearest_resistance_above_picks_the_lowest_level_over_price():
 
 def test_nearest_resistance_above_none_when_everything_is_below():
     assert nearest_resistance_above(100, [80, 90]) is None
+
+
+def test_nearest_confluent_level_with_min_confluence_1_matches_plain_nearest():
+    group_a = [97.0, 95.0, 80.0]
+    group_b = [94.9, 70.0]
+    candidates = group_a + group_b
+
+    result = nearest_confluent_level(
+        100.0, candidates, confluence_groups=(group_a, group_b), direction="below", min_confluence=1
+    )
+
+    assert result == nearest_support_below(100.0, candidates) == 97.0
+
+
+def test_nearest_confluent_level_skips_a_lone_level_for_a_confirmed_one():
+    # 97 is the nearest candidate but only group_a points to it (lone,
+    # noise-level); 95 is a bit farther but confirmed by BOTH groups
+    # (95 in group_a, 94.9 within tolerance in group_b) -> min_confluence=2
+    # should skip 97 and land on 95.
+    group_a = [97.0, 95.0, 80.0]
+    group_b = [94.9, 70.0]
+    candidates = group_a + group_b
+
+    result = nearest_confluent_level(
+        100.0, candidates, confluence_groups=(group_a, group_b), direction="below", min_confluence=2
+    )
+
+    assert result == 95.0
+
+
+def test_nearest_confluent_level_none_when_nothing_qualifies():
+    group_a = [95.0]
+    group_b = [80.0]
+
+    result = nearest_confluent_level(
+        100.0, group_a + group_b, confluence_groups=(group_a, group_b), direction="below", min_confluence=3
+    )
+
+    assert result is None
+
+
+def test_nearest_confluent_level_above_direction():
+    group_a = [103.0, 105.0, 120.0]
+    group_b = [105.1, 130.0]
+
+    result = nearest_confluent_level(
+        100.0, group_a + group_b, confluence_groups=(group_a, group_b), direction="above", min_confluence=2
+    )
+
+    assert result == 105.0
+
+
+def test_nearest_confluent_level_rejects_bad_direction():
+    with pytest.raises(ValueError):
+        nearest_confluent_level(100.0, [90.0], confluence_groups=([90.0],), direction="sideways")
 
 
 def test_confluence_count_counts_groups_with_a_nearby_level():

@@ -15,11 +15,22 @@ useful target (that's the whole point of R-multiple targets — reward has
 to be worth the risk), so this still falls back to a fixed risk-multiple
 target when nothing real is found above entry, or when the nearest real
 ceiling doesn't clear `min_risk_reward`.
+
+Diagnosed directly on real data the first time this was tried: the
+"nearest resistance above" was almost always a noise-level intermediate
+swing high from the retracement's own back-and-forth, not the significant
+prior high — this is why it never beat a plain fixed risk-multiple target
+(see git history / Bitácora Illari). `min_confluence` (default 1, i.e. no
+filtering — preserves that original behavior unless a caller opts in) is
+the fix: via src.analysis.structure.nearest_confluent_level, at 2 it skips
+a lone, single-source ceiling in favor of the next one out that's also
+backed by an independent source (a resistance pivot AND a Fibonacci
+level).
 """
 from __future__ import annotations
 
 from src.analysis.fibonacci import latest_up_leg, retracement_levels
-from src.analysis.structure import nearest_resistance_above, support_resistance_levels
+from src.analysis.structure import nearest_confluent_level, support_resistance_levels
 from src.strategies.registry import RISK_TARGETS
 from src.strategies.types import EvalContext
 
@@ -31,6 +42,7 @@ def structural_target(entry_price: float, stop_price: float, ctx: EvalContext, p
     buffer_pct = params.get("buffer_pct", 0.1)
     min_risk_reward = params.get("min_risk_reward", 1.0)
     fallback_ratio = params.get("fallback_ratio", 2.0)
+    min_confluence = params.get("min_confluence", 1)
 
     risk = entry_price - stop_price
     fallback_target = entry_price + fallback_ratio * risk
@@ -45,7 +57,14 @@ def structural_target(entry_price: float, stop_price: float, ctx: EvalContext, p
         fib_levels = list(retracement_levels(leg["low"], leg["high"]).values())
         resistance_levels = resistance_levels + [leg["high"]]  # the leg's own high is a resistance too
 
-    level = nearest_resistance_above(entry_price, resistance_levels + fib_levels)
+    level = nearest_confluent_level(
+        entry_price,
+        resistance_levels + fib_levels,
+        confluence_groups=(resistance_levels, fib_levels),
+        direction="above",
+        min_confluence=min_confluence,
+        tolerance_pct=tolerance_pct,
+    )
     if level is None:
         return fallback_target
 
