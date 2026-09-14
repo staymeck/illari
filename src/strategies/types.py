@@ -33,12 +33,21 @@ class EvalContext:
     while `higher_tf_window` carries 1d and `price_window` is 1h — an
     additional, independent trend filter (see Bitácora Illari's staged
     4H/5M experiment protocol), not a replacement for `higher_tf_window`.
+
+    `lower_tf_window` (optional, None unless the engine was given
+    `lower_tf_df`): the mirror image, a FINER-grained window (e.g. 5m while
+    `price_window` is 1h) already closed as of the current bar's own
+    close — used by confirmations/lower_tf_confirmation.py for a
+    micro-confirmation evaluated once at the same decision point, not a
+    continuously-rechecked early entry (see
+    src/backtest/intrabar_entry.py, already tried and rejected).
     """
 
     price_window: pd.DataFrame
     marked_window: pd.DataFrame
     higher_tf_window: pd.DataFrame | None = None
     higher_tf_window_2: pd.DataFrame | None = None
+    lower_tf_window: pd.DataFrame | None = None
 
 
 @dataclass(frozen=True)

@@ -3,6 +3,7 @@ from src.strategies.confirmations import (  # noqa: F401  (registers the pieces)
     candlestick,
     fibonacci,
     higher_tf_trend,
+    lower_tf_confirmation,
     macd_momentum,
     rsi_momentum,
     session_filter,
