@@ -4,7 +4,7 @@ confirmations/higher_tf_trend.py."""
 import pandas as pd
 
 from src.backtest.engine import _higher_tf_window_as_of, run_backtest
-from src.strategies.confirmations.higher_tf_trend import higher_tf_trend
+from src.strategies.confirmations.higher_tf_trend import higher_tf_trend, higher_tf_trend_2
 from src.strategies.types import EvalContext
 
 
@@ -89,6 +89,53 @@ def test_higher_tf_trend_confirmation_none_when_mismatched():
     result = higher_tf_trend(ctx, {"required": "uptrend", "order": 1, "lookback_swings": 2})
 
     assert result is None
+
+
+def test_higher_tf_trend_2_confirmation_none_without_its_own_window():
+    # higher_tf_window (the primary/1d one) is populated, but
+    # higher_tf_window_2 (e.g. 4h) is not -> higher_tf_trend_2 must fail
+    # closed regardless of the primary window's state.
+    ctx = EvalContext(
+        price_window=pd.DataFrame(),
+        marked_window=pd.DataFrame(),
+        higher_tf_window=_daily_df([1, 2, 1.5, 3, 2.5, 5, 4, 7]),
+        higher_tf_window_2=None,
+    )
+
+    assert higher_tf_trend_2(ctx, {}) is None
+
+
+def test_higher_tf_trend_2_confirmation_matches_required_trend():
+    uptrend_closes = [1, 2, 1.5, 3, 2.5, 5, 4, 7]
+    ctx = EvalContext(
+        price_window=pd.DataFrame(),
+        marked_window=pd.DataFrame(),
+        higher_tf_window_2=_daily_df(uptrend_closes),
+    )
+
+    result = higher_tf_trend_2(ctx, {"required": "uptrend", "order": 1, "lookback_swings": 2})
+
+    assert result is not None
+    assert result.extras["higher_tf_trend_2"] == "uptrend"
+
+
+def test_run_backtest_with_higher_tf_df_2_wires_the_second_window():
+    from src.strategies.builder import load_strategy
+
+    idx = pd.date_range("2024-01-01", periods=250, freq="h", tz="UTC")
+    df = pd.DataFrame(
+        {"timestamp": idx, "open": 100.0, "high": 100.5, "low": 99.5, "close": 100.0, "volume": 10.0}
+    )
+    strategy = load_strategy("config/strategies/trend_pullback_fib.yaml")
+    downtrend_4h = _daily_df([7, 4, 5, 2.5, 3, 1.5, 2, 1] * 40)  # far too short a trend cycle to confirm anything meaningful, just needs to exist
+
+    # Passing higher_tf_df_2 must not raise and must not change results for
+    # a strategy that never references higher_tf_trend_2.
+    trades_a, equity_a = run_backtest(df, strategy)
+    trades_b, equity_b = run_backtest(df, strategy, higher_tf_df_2=downtrend_4h)
+
+    assert trades_a.equals(trades_b)
+    assert equity_a.equals(equity_b)
 
 
 def test_run_backtest_without_higher_tf_df_is_unaffected():

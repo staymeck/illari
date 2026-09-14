@@ -27,11 +27,18 @@ class EvalContext:
     confirmations/higher_tf_trend.py (Kaufman, Trading Systems and Methods,
     ch. 19 "Multiple Time Frames"). Pieces that don't need it just ignore it,
     same as marked_window.
+
+    `higher_tf_window_2` (optional, None unless the engine was given
+    `higher_tf_df_2`): a THIRD timeframe's already-closed window, e.g. 4h
+    while `higher_tf_window` carries 1d and `price_window` is 1h — an
+    additional, independent trend filter (see Bitácora Illari's staged
+    4H/5M experiment protocol), not a replacement for `higher_tf_window`.
     """
 
     price_window: pd.DataFrame
     marked_window: pd.DataFrame
     higher_tf_window: pd.DataFrame | None = None
+    higher_tf_window_2: pd.DataFrame | None = None
 
 
 @dataclass(frozen=True)

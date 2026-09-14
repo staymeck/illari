@@ -129,6 +129,8 @@ def evaluate_signal(
     strategy: ResolvedStrategy,
     higher_tf_df: pd.DataFrame | None = None,
     higher_tf_lookback_bars: int = 50,
+    higher_tf_df_2: pd.DataFrame | None = None,
+    higher_tf_lookback_bars_2: int = 50,
 ) -> SignalEvaluation:
     """Evaluates `strategy`'s context -> setup -> confirmations chain on the
     LAST bar of `df` only. `df` only needs to cover `strategy.lookback_bars`
@@ -155,7 +157,20 @@ def evaluate_signal(
             higher_tf_df, df["timestamp"].iloc[i], higher_tf_lookback_bars, interval
         )
 
-    ctx = EvalContext(price_window=price_window, marked_window=marked_window, higher_tf_window=higher_tf_window)
+    higher_tf_window_2 = None
+    if higher_tf_df_2 is not None:
+        higher_tf_df_2 = higher_tf_df_2.reset_index(drop=True)
+        interval_2 = higher_tf_df_2["timestamp"].diff().median()
+        higher_tf_window_2 = _higher_tf_window_as_of(
+            higher_tf_df_2, df["timestamp"].iloc[i], higher_tf_lookback_bars_2, interval_2
+        )
+
+    ctx = EvalContext(
+        price_window=price_window,
+        marked_window=marked_window,
+        higher_tf_window=higher_tf_window,
+        higher_tf_window_2=higher_tf_window_2,
+    )
     trend = strategy.context_fn(ctx, strategy.context_params)
     signal = _find_entry_signal(ctx, strategy)
 
@@ -261,6 +276,8 @@ def run_backtest(
     strategy: ResolvedStrategy,
     higher_tf_df: pd.DataFrame | None = None,
     higher_tf_lookback_bars: int = 50,
+    higher_tf_df_2: pd.DataFrame | None = None,
+    higher_tf_lookback_bars_2: int = 50,
 ) -> tuple[pd.DataFrame, pd.Series]:
     """Simulates `strategy` over `df` (columns: timestamp, open, high, low,
     close, volume) and returns (trades, equity_curve).
@@ -272,6 +289,13 @@ def run_backtest(
     confirmations/higher_tf_trend.py. Omitting it (the default) leaves
     `higher_tf_window` as None everywhere, identical to every strategy run
     before this parameter existed.
+
+    `higher_tf_df_2` (optional): a THIRD timeframe (e.g. 4h, sitting between
+    `df`=1h and `higher_tf_df`=1d) — populates `higher_tf_window_2` the same
+    way, for a second independent higher-timeframe confirmation piece (see
+    confirmations/higher_tf_trend.py's `window` param). Omitting it leaves
+    `higher_tf_window_2` as None, identical to every run before this
+    parameter existed.
     """
     df = df.reset_index(drop=True)
     marked_full = find_swing_points(df, order=strategy.swing_order)  # computed once for the whole series
@@ -280,6 +304,11 @@ def run_backtest(
     if higher_tf_df is not None:
         higher_tf_df = higher_tf_df.reset_index(drop=True)
         higher_tf_interval = higher_tf_df["timestamp"].diff().median()
+
+    higher_tf_interval_2 = None
+    if higher_tf_df_2 is not None:
+        higher_tf_df_2 = higher_tf_df_2.reset_index(drop=True)
+        higher_tf_interval_2 = higher_tf_df_2["timestamp"].diff().median()
 
     trades: list[dict] = []
     equity = strategy.initial_equity
@@ -302,7 +331,17 @@ def run_backtest(
             higher_tf_window = _higher_tf_window_as_of(
                 higher_tf_df, df["timestamp"].iloc[i], higher_tf_lookback_bars, higher_tf_interval
             )
-        ctx = EvalContext(price_window=price_window, marked_window=marked_window, higher_tf_window=higher_tf_window)
+        higher_tf_window_2 = None
+        if higher_tf_df_2 is not None:
+            higher_tf_window_2 = _higher_tf_window_as_of(
+                higher_tf_df_2, df["timestamp"].iloc[i], higher_tf_lookback_bars_2, higher_tf_interval_2
+            )
+        ctx = EvalContext(
+            price_window=price_window,
+            marked_window=marked_window,
+            higher_tf_window=higher_tf_window,
+            higher_tf_window_2=higher_tf_window_2,
+        )
         signal = _find_entry_signal(ctx, strategy)
 
         if signal is None:
