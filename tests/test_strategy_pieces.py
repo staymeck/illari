@@ -9,11 +9,13 @@ import pytest
 
 from src.analysis.structure import find_swing_points
 from src.strategies.confirmations.adx_strength import adx_strength
+from src.strategies.confirmations.candle_geometry import marubozu, narrow_range
 from src.strategies.confirmations.candlestick import bearish_candlestick, candlestick
 from src.strategies.confirmations.fibonacci import fibonacci_confluence
 from src.strategies.confirmations.macd_momentum import macd_momentum
 from src.strategies.confirmations.rsi_momentum import rsi_momentum
 from src.strategies.confirmations.session_filter import session_filter
+from src.strategies.confirmations.trendline import trendline_confirmation
 from src.strategies.confirmations.volume import volume as volume_confirmation
 from src.strategies.confirmations.vwap_bias import vwap_bias
 from src.strategies.context.dow_trend import dow_trend
@@ -140,6 +142,70 @@ def test_bearish_candlestick_confirmation_piece_none_for_plain_candle():
     df = _candles([{"open": 10, "close": 10.2, "high": 10.5, "low": 9.5}])
 
     assert bearish_candlestick(_ctx(df), {}) is None
+
+
+def test_marubozu_confirmation_piece_detects_full_body_bullish_candle():
+    df = _candles([{"open": 10, "close": 20, "high": 20.1, "low": 9.9}])
+
+    result = marubozu(_ctx(df), {})
+
+    assert result is not None
+
+
+def test_marubozu_confirmation_piece_none_for_candle_with_big_wicks():
+    df = _candles([{"open": 10, "close": 12, "high": 20, "low": 5}])
+
+    assert marubozu(_ctx(df), {}) is None
+
+
+def test_marubozu_confirmation_piece_none_for_bearish_candle():
+    df = _candles([{"open": 20, "close": 10, "high": 20.1, "low": 9.9}])
+
+    assert marubozu(_ctx(df), {}) is None
+
+
+def test_narrow_range_confirmation_piece_detects_the_tightest_recent_candle():
+    rows = [{"open": 0, "close": 5, "high": 10, "low": 0}] * 6 + [{"open": 5, "close": 5, "high": 5.5, "low": 4.5}]
+    df = _candles(rows)
+
+    result = narrow_range(_ctx(df), {"lookback": 7})
+
+    assert result is not None
+
+
+def test_narrow_range_confirmation_piece_none_when_not_the_tightest():
+    rows = [{"open": 4, "close": 5, "high": 5.5, "low": 4.5}] * 6 + [{"open": 0, "close": 5, "high": 10, "low": 0}]
+    df = _candles(rows)
+
+    assert narrow_range(_ctx(df), {"lookback": 7}) is None
+
+
+def test_trendline_confirmation_piece_passes_when_price_sits_on_the_line():
+    # Swing lows at 5, 6, 7 (order=1) fit a rising line whose value at the
+    # next bar (index 7) is exactly 8 - the last close sits right on it.
+    closes = [10, 5, 10, 6, 10, 7, 10, 8]
+    df = _candles([{"open": c, "close": c} for c in closes])
+    ctx = _ctx(df, order=1)
+
+    result = trendline_confirmation(ctx, {"min_points": 3, "atr_period": 3})
+
+    assert result is not None
+
+
+def test_trendline_confirmation_piece_none_when_price_is_far_from_the_line():
+    closes = [10, 5, 10, 6, 10, 7, 10, 1000]
+    df = _candles([{"open": c, "close": c} for c in closes])
+    ctx = _ctx(df, order=1)
+
+    assert trendline_confirmation(ctx, {"min_points": 3, "atr_period": 3}) is None
+
+
+def test_trendline_confirmation_piece_none_without_enough_swings():
+    closes = [10, 5, 10]
+    df = _candles([{"open": c, "close": c} for c in closes])
+    ctx = _ctx(df, order=1)
+
+    assert trendline_confirmation(ctx, {"min_points": 3}) is None
 
 
 def test_volume_confirmation_piece_true_when_spike_and_buyer_dominant():
