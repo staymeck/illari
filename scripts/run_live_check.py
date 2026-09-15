@@ -7,6 +7,15 @@ script itself has no scheduling logic, it just does one check "as of now".
 Running it more or less often than hourly is harmless (check_market is
 idempotent against re-checking the same state), just wasteful or laggy.
 
+Also logs a per-piece diagnostic trace on every check (src.live.diagnostics
+— which pieces of the strategy passed/failed and the final yes/no) and
+regenerates each market's interactive HTML chart
+(src.report.live_diagnostics_chart), same instrumentation as
+scripts/run_live_check_volatility.py — purely observational, does not
+change the entry/exit decision or the sizing (still 100% of equity per
+trade here, unlike that other script). Added so BOTH live containers give
+the same level of "why did/didn't it enter" detail, not just the newer one.
+
 Usage:
     .venv/bin/python scripts/run_live_check.py
 """
@@ -22,7 +31,10 @@ import pandas as pd
 
 from config.markets import MARKETS
 from src.data.fetcher import fetch_ohlcv
+from src.live.diagnostics import diagnose_entry
 from src.live.paper_trading import default_state, run_check
+from src.report.live_diagnostics_chart import write_live_diagnostics_chart
+from src.report.paths import _slug
 from src.strategies.builder import load_strategy
 
 STRATEGY_PATH = "config/strategies/trend_pullback_htf_confluence.yaml"
@@ -38,6 +50,8 @@ STATE_DIR = Path(__file__).resolve().parents[1] / "data" / "live_lab"
 STATE_PATH = STATE_DIR / "state.json"
 TRADE_LOG_PATH = STATE_DIR / "trades.csv"
 EVENT_LOG_PATH = STATE_DIR / "events.log"
+DIAGNOSTICS_DIR = STATE_DIR / "diagnostics"
+CHARTS_DIR = STATE_DIR / "charts"
 
 
 def _load_state() -> dict:
@@ -72,6 +86,22 @@ def _append_closed_trades(events: list[dict]) -> None:
     combined.to_csv(TRADE_LOG_PATH, index=False)
 
 
+def _diagnostics_path(symbol: str) -> Path:
+    return DIAGNOSTICS_DIR / f"{_slug(symbol)}.json"
+
+
+def _load_diagnostics(symbol: str) -> dict:
+    path = _diagnostics_path(symbol)
+    if path.exists():
+        return json.loads(path.read_text())
+    return {}
+
+
+def _save_diagnostics(symbol: str, diagnostics: dict) -> None:
+    DIAGNOSTICS_DIR.mkdir(parents=True, exist_ok=True)
+    _diagnostics_path(symbol).write_text(json.dumps(diagnostics, indent=2))
+
+
 def main() -> None:
     strategy = load_strategy(STRATEGY_PATH)
     state = _load_state()
@@ -88,6 +118,18 @@ def main() -> None:
     new_state, events = run_check(strategy, data_by_market, state)
     _save_state(new_state)
     _append_closed_trades(events)
+
+    # Diagnostic trace + chart, for EVERY market, every check — independent
+    # of run_check's own state machine (see src/live/diagnostics.py).
+    for market in MARKETS:
+        df, higher_tf_df = data_by_market[market.symbol]
+        trace = diagnose_entry(df, higher_tf_df, strategy)
+        diagnostics = _load_diagnostics(market.symbol)
+        diagnostics[trace["timestamp"]] = trace
+        _save_diagnostics(market.symbol, diagnostics)
+        write_live_diagnostics_chart(
+            df.tail(200), diagnostics, market.symbol, CHARTS_DIR / f"{_slug(market.symbol)}.html"
+        )
 
     timestamp = pd.Timestamp.now(tz="UTC").isoformat()
     lines = [f"[{timestamp}] check complete — {len(events)} event(s)"]
@@ -106,6 +148,7 @@ def main() -> None:
     print(f"\naccounts: {json.dumps(new_state['accounts'], indent=2)}")
     print(f"state: {STATE_PATH}")
     print(f"trade log: {TRADE_LOG_PATH}")
+    print(f"diagnostics charts: {CHARTS_DIR}/<market>.html")
 
 
 if __name__ == "__main__":
