@@ -1,0 +1,29 @@
+{
+  "markets": {
+    "AAPL": null,
+    "MSFT": null,
+    "GOOGL": null,
+    "NVDA": null,
+    "AMD": null,
+    "PG": null,
+    "KO": null,
+    "WMT": null,
+    "TSLA": null,
+    "AMZN": null,
+    "XOM": null,
+    "CVX": null,
+    "JPM": null,
+    "BAC": null,
+    "JNJ": null,
+    "UNH": null,
+    "CAT": null,
+    "BA": null,
+    "GME": null,
+    "AMC": null
+  },
+  "accounts": {
+    "10000": 10000.0,
+    "100": 100.0,
+    "10": 10.0
+  }
+}

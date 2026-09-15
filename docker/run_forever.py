@@ -1,6 +1,15 @@
-"""Entry point for the live paper-trading lab's Docker container: runs
-scripts/run_live_check.py once per hour, aligned to the hour boundary plus
-a small buffer (so Binance has definitely published the candle), forever.
+"""Entry point for the live paper-trading lab's Docker container: runs one
+check script once per hour, aligned to the hour boundary plus a small
+buffer (so the exchange/data source has definitely published the
+candle), forever.
+
+Which check script to run is set by the LIVE_CHECK_SCRIPT env var
+(default: run_live_check.py — the original crypto strategy, 100% equity
+per trade). Other docker-compose services set it to
+run_live_check_volatility.py (crypto, volatility-scaled sizing) or
+run_live_check_stocks.py (US equities via Alpaca, own engine) — same
+image, same scheduling logic, different script/state directory, so every
+live lab genuinely runs on identical fetched data at identical times.
 
 No cron daemon inside the container — a plain sleep loop is simpler and
 more robust for a single-purpose container than getting cron to behave as
@@ -11,6 +20,7 @@ this project specifically because it needs to reach api.binance.com).
 """
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 from datetime import datetime, timedelta, timezone
@@ -18,7 +28,7 @@ from pathlib import Path
 from time import sleep
 
 BUFFER_SECONDS = 5 * 60  # run 5 minutes after each hour closes
-SCRIPT_PATH = Path(__file__).resolve().parents[1] / "scripts" / "run_live_check.py"
+SCRIPT_PATH = Path(__file__).resolve().parents[1] / "scripts" / os.environ.get("LIVE_CHECK_SCRIPT", "run_live_check.py")
 
 
 def seconds_until_next_run(now: datetime | None = None) -> float:

@@ -9,6 +9,10 @@ __pycache__/
 /data/live_lab/*
 !/data/live_lab/state.json
 !/data/live_lab/trades.csv
+!/data/live_lab_stocks/
+/data/live_lab_stocks/*
+!/data/live_lab_stocks/state.json
+!/data/live_lab_stocks/trades.csv
 /reports/
 .claude/
 /.ollama-local/

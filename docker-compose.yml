@@ -6,3 +6,20 @@ services:
     volumes:
       - ./data/live_lab:/app/data/live_lab
     restart: unless-stopped
+
+  # Stock-market live lab: SAME strategy/engine, 100% equity per trade,
+  # but on US equities via Alpaca (config/stock_markets.py's 20-ticker
+  # catalog) instead of crypto via Binance — see
+  # scripts/run_live_check_stocks.py. Needs Alpaca paper-trading API keys
+  # (see .env.example) passed in via env_file.
+  illari-live-lab-stocks:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    environment:
+      - LIVE_CHECK_SCRIPT=run_live_check_stocks.py
+    env_file:
+      - .env
+    volumes:
+      - ./data/live_lab_stocks:/app/data/live_lab_stocks
+    restart: unless-stopped
