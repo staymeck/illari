@@ -79,6 +79,20 @@ def _client():
     return StockHistoricalDataClient(api_key, secret_key)
 
 
+def _drop_invalid_bars(df: pd.DataFrame, symbol: str, timeframe: str) -> pd.DataFrame:
+    """Drops bars with non-positive OHLC — the free IEX feed occasionally
+    prints a corrupt one (e.g. open=0, low=0 seen on GME 2021-06-03 13:00
+    UTC — a data artifact, not a real trade: a security's price is never
+    zero or negative). Filtered here, at the ingestion boundary, rather
+    than left for downstream math (e.g. structure.py's support/resistance
+    clustering) to divide by zero on — same principle as validating any
+    external input before trusting it."""
+    bad = (df[["open", "high", "low", "close"]] <= 0).any(axis=1)
+    if bad.any():
+        print(f"[stock_fetcher] dropped {int(bad.sum())} bar(s) with non-positive OHLC for {symbol} ({timeframe})")
+    return df.loc[~bad]
+
+
 def _cache_path(symbol: str, timeframe: str) -> Path:
     return DATA_DIR / "ohlcv_stocks" / f"{symbol}_{timeframe}.parquet"
 
@@ -137,6 +151,7 @@ def fetch_stock_ohlcv(
         ]
     )
     if not df.empty:
+        df = _drop_invalid_bars(df, symbol, timeframe)
         df = df.drop_duplicates(subset="timestamp").sort_values("timestamp")
         df = df[(df["timestamp"] >= since_ts) & (df["timestamp"] <= until_ts)].reset_index(drop=True)
 
