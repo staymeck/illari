@@ -1,0 +1,8 @@
+services:
+  illari-live-lab:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    volumes:
+      - ./data/live_lab:/app/data/live_lab
+    restart: unless-stopped
