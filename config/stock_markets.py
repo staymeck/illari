@@ -1,23 +1,26 @@
-"""US equity markets for the stock-market variant of the lab — the same
+"""US equity markets for the stock-market variant of the lab — same
 "deliberately varied dynamics" principle as config/markets.py's 5 crypto
 markets (a result must hold up across genuinely different assets, not
-just one ticker's quirk wearing different names), mapped onto stocks:
+just one ticker's quirk wearing different names), spread across sectors
+so a result isn't one industry's quirk either.
 
-- AAPL: mega-cap tech blue chip — the most liquid single stock in the
-  world, plays the role BTC plays among crypto markets.
-- PG (Procter & Gamble): consumer staples, moves on rates/macro rather
-  than sentiment — the equity equivalent of PAXG's "non-crypto-sentiment"
-  role.
-- TSLA: high-beta, narrative/retail-driven — large swings on news,
-  sentiment-heavy but still has real fundamentals underneath, sits
-  between SOL and DOGE in character.
-- XOM (ExxonMobil): cyclical, driven by oil prices — a genuinely
-  different macro driver than tech sentiment or consumer spending.
-- GME (GameStop): the closest equity equivalent of DOGE — driven by
-  social-media/retail sentiment more than fundamentals. Deliberately
-  included as a stress test: if the strategy's edge is real it should
-  struggle here same as everywhere else; if it only "works" on GME's
-  narrative-driven runs, that's a red flag, not a result to celebrate.
+Expanded from an initial 5 to 20 after the first pass showed the strategy
+is already so selective (by design, same as crypto) that 5 tickers only
+produced 1-7 trades each — nowhere near enough to say anything (see
+scripts/run_stock_baseline_backtest.py's own printed caveat). This widens
+the sample without changing the strategy or the logic at all.
+
+Sectors, deliberately spread (not weighted toward tech):
+- Tech mega-cap: AAPL, MSFT, GOOGL
+- Semiconductors (cyclical, AI-hype volatility): NVDA, AMD
+- Consumer staples (macro-driven, not sentiment): PG, KO, WMT
+- Growth/narrative-driven large cap: TSLA, AMZN
+- Energy (oil-price-driven, a different macro factor): XOM, CVX
+- Financials: JPM, BAC
+- Healthcare: JNJ, UNH
+- Industrials (cyclical, some idiosyncratic company risk): CAT, BA
+- Sentiment/meme (the equity equivalent of DOGE — deliberate stress
+  test, not expected to look good): GME, AMC
 
 Data comes from Alpaca (src/data/stock_fetcher.py), not Binance — this
 file is otherwise structurally identical to config/markets.py so the same
@@ -35,11 +38,26 @@ class StockMarket:
 
 
 STOCK_MARKETS: list[StockMarket] = [
-    StockMarket("AAPL", "mega-cap tech blue chip, base reference"),
+    StockMarket("AAPL", "tech mega-cap"),
+    StockMarket("MSFT", "tech mega-cap — software/cloud"),
+    StockMarket("GOOGL", "tech mega-cap — search/ads"),
+    StockMarket("NVDA", "semiconductors — AI-hype narrative volatility"),
+    StockMarket("AMD", "semiconductors — cyclical"),
     StockMarket("PG", "consumer staples — moves on macro/rates, not sentiment"),
+    StockMarket("KO", "consumer staples"),
+    StockMarket("WMT", "consumer staples / retail"),
     StockMarket("TSLA", "high-beta, narrative/retail-driven"),
-    StockMarket("XOM", "cyclical, driven by oil prices — a different macro driver"),
+    StockMarket("AMZN", "e-commerce/cloud growth large cap"),
+    StockMarket("XOM", "cyclical, driven by oil prices"),
+    StockMarket("CVX", "cyclical, driven by oil prices"),
+    StockMarket("JPM", "financials/banking"),
+    StockMarket("BAC", "financials/banking"),
+    StockMarket("JNJ", "healthcare/pharma"),
+    StockMarket("UNH", "healthcare/insurance"),
+    StockMarket("CAT", "industrials, cyclical"),
+    StockMarket("BA", "industrials, idiosyncratic company-specific risk"),
     StockMarket("GME", "sentiment/meme-driven — the equity equivalent of DOGE"),
+    StockMarket("AMC", "sentiment/meme-driven"),
 ]
 
 # Equities only trade during exchange sessions (see stock_fetcher.py's
