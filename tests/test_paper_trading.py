@@ -156,3 +156,57 @@ def test_run_check_flags_below_minimum_notional_on_open():
     assert opened["type"] == "opened"
     assert opened["accounts"]["10"]["below_min_notional"] is True
     assert opened["accounts"]["10000"]["below_min_notional"] is False
+
+
+def test_check_market_freezes_size_multiplier_at_open_and_never_reprices_it():
+    df = _df([_bar(100, 100, 100, 100)] * 3 + [_bar(100, 106, 100, 106)] + [_bar(106, 106, 106, 106)])
+    strategy = _strategy(_fires_above_105)
+    pending = {"status": "pending", "signal_bar_time": str(df["timestamp"].iloc[3])}
+
+    new_state, events = check_market(df, None, strategy, pending, size_multiplier_fn=lambda ctx: 0.4)
+
+    assert new_state["size_multiplier"] == pytest.approx(0.4)
+    assert events[0]["size_multiplier"] == pytest.approx(0.4)
+
+
+def test_check_market_size_multiplier_defaults_to_full_equity():
+    df = _df([_bar(100, 100, 100, 100)] * 3 + [_bar(100, 106, 100, 106)] + [_bar(106, 106, 106, 106)])
+    strategy = _strategy(_fires_above_105)
+    pending = {"status": "pending", "signal_bar_time": str(df["timestamp"].iloc[3])}
+
+    new_state, _events = check_market(df, None, strategy, pending)
+
+    assert new_state["size_multiplier"] == pytest.approx(1.0)
+
+
+def test_run_check_scales_account_updates_by_the_frozen_size_multiplier():
+    df = _df([_bar(106, 106, 106, 106), _bar(106, 106, 90, 95)])
+    open_state = {
+        "status": "open", "entry_time": str(df["timestamp"].iloc[0]), "entry_price": 106.0,
+        "stop_price": 99.0, "target_price": 120.0, "extras": {}, "size_multiplier": 0.5,
+    }
+    strategy = _strategy(_fires_above_105, max_holding_bars=5)
+    state = default_state()
+    state["markets"]["BTC/USDT"] = open_state
+
+    new_state, events = run_check(strategy, {"BTC/USDT": (df, None)}, state)
+
+    closed = events[0]
+    pnl_pct = closed["trade"]["pnl_pct"]
+    for size in ACCOUNT_SIZES:
+        key = str(int(size))
+        expected_after = size * (1 + 0.5 * pnl_pct / 100)
+        assert new_state["accounts"][key] == pytest.approx(expected_after, rel=1e-6)
+
+
+def test_run_check_opened_notional_reflects_the_size_multiplier():
+    df = _df([_bar(100, 100, 100, 100)] * 3 + [_bar(100, 106, 100, 106)] + [_bar(106, 106, 106, 106)])
+    strategy = _strategy(_fires_above_105)
+    state = default_state()
+    pending = {"status": "pending", "signal_bar_time": str(df["timestamp"].iloc[3])}
+    state["markets"]["BTC/USDT"] = pending
+
+    _, events = run_check(strategy, {"BTC/USDT": (df, None)}, state, size_multiplier_fn=lambda ctx: 0.25)
+
+    opened = events[0]
+    assert opened["accounts"]["10000"]["notional_usd"] == pytest.approx(2500.0)

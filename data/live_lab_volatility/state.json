@@ -1,0 +1,14 @@
+{
+  "markets": {
+    "BTC/USDT": null,
+    "ETH/USDT": null,
+    "PAXG/USDT": null,
+    "SOL/USDT": null,
+    "DOGE/USDT": null
+  },
+  "accounts": {
+    "10000": 10000.0,
+    "100": 100.0,
+    "10": 10.0
+  }
+}

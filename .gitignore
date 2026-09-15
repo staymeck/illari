@@ -8,6 +8,13 @@ __pycache__/
 /data/live_lab/*
 !/data/live_lab/state.json
 !/data/live_lab/trades.csv
+!/data/live_lab_volatility/
+/data/live_lab_volatility/*
+!/data/live_lab_volatility/state.json
+!/data/live_lab_volatility/trades.csv
+# diagnostics/ and charts/ under live_lab_volatility stay local-only
+# (regenerated every hour, meant to be opened locally, not git-tracked —
+# same reasoning /reports/ below is fully ignored).
 /reports/
 .claude/
 /.ollama-local/

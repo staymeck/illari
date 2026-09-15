@@ -77,11 +77,25 @@ def _evaluate_at(
 
 
 def check_market(
-    df: pd.DataFrame, higher_tf_df: pd.DataFrame | None, strategy: ResolvedStrategy, market_state: dict | None
+    df: pd.DataFrame,
+    higher_tf_df: pd.DataFrame | None,
+    strategy: ResolvedStrategy,
+    market_state: dict | None,
+    size_multiplier_fn=None,
 ) -> tuple[dict | None, list[dict]]:
     """One check for one market: given fresh OHLCV and the market's current
     state (None / "pending" / "open"), returns (new_state, events) —
-    events are plain dicts for logging, never raise on their own."""
+    events are plain dicts for logging, never raise on their own.
+
+    `size_multiplier_fn` (optional): `EvalContext -> float`, called once at
+    the moment a pending signal resolves into an open position, to decide
+    what fraction of equity that trade risks (see src/live/position_sizing.py
+    — e.g. volatility_size_multiplier). The chosen fraction is frozen into
+    `market_state["size_multiplier"]` for that trade's whole lifetime (a
+    later check must never re-price the size of an already-open trade).
+    Omitted (the default): every trade risks 100% of equity, identical to
+    this module's behavior before this parameter existed."""
+    size_multiplier_fn = size_multiplier_fn or (lambda ctx: 1.0)
     df = df.reset_index(drop=True)
     events: list[dict] = []
     status = market_state.get("status") if market_state else None
@@ -114,7 +128,7 @@ def check_market(
         )
         trade["entry_time"] = str(trade["entry_time"])
         trade["exit_time"] = str(trade["exit_time"])
-        events.append({"type": "closed", "trade": trade})
+        events.append({"type": "closed", "trade": trade, "size_multiplier": market_state.get("size_multiplier", 1.0)})
         return None, events
 
     if status == "pending":
@@ -140,6 +154,9 @@ def check_market(
         entry_price = float(df["open"].iloc[entry_idx])
         stop_price = strategy.stop_fn(entry_price, setup, ctx, strategy.stop_params)
         target_price = strategy.target_fn(entry_price, stop_price, ctx, strategy.target_params)
+        # Sized once, here, using the same ctx (as of the signal bar's
+        # close) the entry decision itself used — never re-priced later.
+        size_multiplier = float(size_multiplier_fn(ctx))
         new_state = {
             "status": "open",
             "entry_time": str(df["timestamp"].iloc[entry_idx]),
@@ -147,8 +164,12 @@ def check_market(
             "stop_price": stop_price,
             "target_price": target_price,
             "extras": extras,
+            "size_multiplier": size_multiplier,
         }
-        events.append({"type": "opened", "entry_price": entry_price, "stop_price": stop_price, "target_price": target_price})
+        events.append({
+            "type": "opened", "entry_price": entry_price, "stop_price": stop_price,
+            "target_price": target_price, "size_multiplier": size_multiplier,
+        })
         return new_state, events
 
     # status is None: look for a fresh signal on the latest closed bar.
@@ -164,13 +185,18 @@ def check_market(
 
 
 def run_check(
-    strategy: ResolvedStrategy, data_by_market: dict[str, tuple[pd.DataFrame, pd.DataFrame | None]], state: dict | None
+    strategy: ResolvedStrategy,
+    data_by_market: dict[str, tuple[pd.DataFrame, pd.DataFrame | None]],
+    state: dict | None,
+    size_multiplier_fn=None,
 ) -> tuple[dict, list[dict]]:
     """Runs check_market for every market in `data_by_market`, updates each
     of the 3 parallel accounts on every closed trade (100% of that
-    account's current equity per trade — same convention run_backtest
-    itself uses), and flags (never blocks) when a position would fall
-    under Binance's typical minimum order value for the smallest account.
+    account's current equity per trade, scaled by `size_multiplier_fn`
+    when given — see check_market's own docstring; omitted, this is
+    exactly the 100%-of-equity convention run_backtest itself uses), and
+    flags (never blocks) when the actual sized notional would fall under
+    Binance's typical minimum order value for the smallest account.
     Returns (new_state, events) — the caller owns persisting `new_state`
     and logging `events`."""
     state = state or default_state()
@@ -178,24 +204,27 @@ def run_check(
 
     for symbol, (df, higher_tf_df) in data_by_market.items():
         market_state = state["markets"].get(symbol)
-        new_market_state, events = check_market(df, higher_tf_df, strategy, market_state)
+        new_market_state, events = check_market(df, higher_tf_df, strategy, market_state, size_multiplier_fn)
         state["markets"][symbol] = new_market_state
 
         for event in events:
             event["market"] = symbol
             if event["type"] == "opened":
+                size_multiplier = event.get("size_multiplier", 1.0)
                 event["accounts"] = {}
                 for account_key, equity in state["accounts"].items():
+                    notional_usd = equity * size_multiplier
                     event["accounts"][account_key] = {
-                        "notional_usd": round(equity, 2),
-                        "below_min_notional": equity < MIN_NOTIONAL_USD,
+                        "notional_usd": round(notional_usd, 2),
+                        "below_min_notional": notional_usd < MIN_NOTIONAL_USD,
                     }
             elif event["type"] == "closed":
                 pnl_pct = event["trade"]["pnl_pct"]
+                size_multiplier = event.get("size_multiplier", 1.0)
                 event["accounts"] = {}
                 for account_key in list(state["accounts"]):
                     equity_before = state["accounts"][account_key]
-                    equity_after = equity_before * (1 + pnl_pct / 100)
+                    equity_after = equity_before * (1 + size_multiplier * pnl_pct / 100)
                     event["accounts"][account_key] = {
                         "equity_before": round(equity_before, 2),
                         "equity_after": round(equity_after, 2),

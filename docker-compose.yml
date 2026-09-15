@@ -6,3 +6,19 @@ services:
     volumes:
       - ./data/live_lab:/app/data/live_lab
     restart: unless-stopped
+
+  # Second, parallel live lab: SAME strategy/signals, but position size
+  # scaled by volatility regime instead of a fixed 100% of equity per
+  # trade (see src/live/position_sizing.py, scripts/run_live_check_volatility.py).
+  # Own state/data directory, so the two approaches compare against each
+  # other on identical fetched market data without ever touching each
+  # other's state.
+  illari-live-lab-volatility:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    environment:
+      - LIVE_CHECK_SCRIPT=run_live_check_volatility.py
+    volumes:
+      - ./data/live_lab_volatility:/app/data/live_lab_volatility
+    restart: unless-stopped
