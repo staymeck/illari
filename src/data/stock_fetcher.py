@@ -126,7 +126,7 @@ def fetch_stock_ohlcv(
     df = pd.DataFrame(
         [
             {
-                "timestamp": pd.Timestamp(bar.timestamp, tz="UTC"),
+                "timestamp": pd.Timestamp(bar.timestamp).tz_convert("UTC"),
                 "open": float(bar.open),
                 "high": float(bar.high),
                 "low": float(bar.low),
