@@ -6,11 +6,18 @@ from unittest.mock import MagicMock, patch
 
 import pandas as pd
 
-from src.analysis.llm_score import format_candles, parse_score, score_candles
+from src.analysis.llm_score import format_candles, format_context, parse_score, score_candles
 
 
-def _window() -> pd.DataFrame:
-    return pd.DataFrame({"open": [100.0, 100.5], "high": [100.6, 101.0], "low": [99.8, 100.2], "close": [100.5, 100.9]})
+def _window(n: int = 2) -> pd.DataFrame:
+    return pd.DataFrame(
+        {
+            "open": [100.0 + i for i in range(n)],
+            "high": [100.6 + i for i in range(n)],
+            "low": [99.8 + i for i in range(n)],
+            "close": [100.5 + i for i in range(n)],
+        }
+    )
 
 
 def test_format_candles_lists_ohlc_oldest_to_newest():
@@ -19,7 +26,20 @@ def test_format_candles_lists_ohlc_oldest_to_newest():
     lines = text.splitlines()
     assert len(lines) == 2
     assert "O=100.0000" in lines[0] and "C=100.5000" in lines[0]
-    assert "O=100.5000" in lines[1] and "C=100.9000" in lines[1]
+    assert "O=101.0000" in lines[1] and "C=101.5000" in lines[1]
+
+
+def test_format_context_lists_only_available_fields():
+    text = format_context({"pattern": "hammer", "context_trend": "uptrend", "fib_ratio": None})
+
+    assert "hammer" in text
+    assert "uptrend" in text
+    assert "Fibonacci" not in text  # fib_ratio was None -> excluded
+
+
+def test_format_context_placeholder_when_nothing_available():
+    assert format_context(None) == "(no additional analysis fields available)"
+    assert format_context({}) == "(no additional analysis fields available)"
 
 
 def test_parse_score_extracts_a_valid_integer():
@@ -40,7 +60,7 @@ def test_score_candles_returns_parsed_score_on_success():
     fake_response.__enter__.return_value = fake_response
 
     with patch("src.analysis.llm_score.urllib.request.urlopen", return_value=fake_response):
-        score = score_candles(_window())
+        score = score_candles(_window(), context={"pattern": "hammer"})
 
     assert score == 68
 
@@ -61,3 +81,16 @@ def test_score_candles_none_on_unparseable_response():
         score = score_candles(_window())
 
     assert score is None
+
+
+def test_score_candles_sends_the_requested_num_ctx():
+    fake_response = MagicMock()
+    fake_response.read.return_value = json.dumps({"response": "50"}).encode()
+    fake_response.__enter__.return_value = fake_response
+
+    with patch("src.analysis.llm_score.urllib.request.urlopen", return_value=fake_response) as mock_urlopen:
+        score_candles(_window(), num_ctx=8192)
+
+    sent_request = mock_urlopen.call_args[0][0]
+    sent_payload = json.loads(sent_request.data)
+    assert sent_payload["options"]["num_ctx"] == 8192

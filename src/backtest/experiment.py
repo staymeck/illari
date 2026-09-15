@@ -33,6 +33,8 @@ _LOG_COLUMNS = [
     "context_trend",
     "higher_tf_trend",
     "pattern",
+    "fib_ratio",
+    "volume_bias",
 ]
 
 
@@ -75,7 +77,9 @@ def experiment_report(trades: pd.DataFrame) -> dict:
             "expectancy_r": 0.0, "avg_winner_r": 0.0, "avg_loser_r": 0.0,
         }
 
-    r = compute_r_multiples(trades)
+    # Accepts either raw engine trades (has pnl_pct, R computed fresh) or a
+    # build_trade_log() result (already has r_multiple, no pnl_pct column).
+    r = trades["r_multiple"] if "r_multiple" in trades.columns else compute_r_multiples(trades)
     wins = r[r > 0]
     losses = r[r <= 0]
     n = len(r)

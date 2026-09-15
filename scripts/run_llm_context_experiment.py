@@ -3,12 +3,21 @@ with how a trade actually turned out? Strictly a post-hoc check — the
 score never touches the entry decision (see src/analysis/llm_score.py's
 docstring on why).
 
+v2: the first version (24 bare candles, no framing) came back with a null
+correlation and a distribution clustered into ~14 repeated values across
+125 trades — not evidence the idea fails, just that the model had too
+little to work with. This version gives it a trader-persona prompt, the
+same analysis context our own deterministic pieces already computed for
+that setup (pattern, confirmed trend, Fibonacci ratio, volume bias), and
+300 candles of lookback (matching the engine's own `lookback_bars`
+convention) instead of 24.
+
 For every trade the frozen baseline (trend_pullback_htf_confluence) took
-in the known window, takes the `n_candles` 5-minute candles immediately
-before the entry, asks the local Ollama model for a 0-100 score, and
-records it alongside the trade's actual R-multiple outcome. Then checks:
-does a higher score associate with a better outcome (Spearman correlation
-+ a simple high/low split), or not?
+in the known window, takes the `N_CANDLES` 5-minute candles immediately
+before the entry plus its own CONTEXT_FIELDS, asks the local Ollama model
+for a 0-100 score, and records it alongside the trade's actual R-multiple
+outcome. Then checks: does a higher score associate with a better outcome
+(Spearman correlation + a simple high/low split), or not?
 
 Requires a local Ollama server running (see docs/PLAN.md's live-lab notes)
 — .ollama-local/bin/ollama serve, with qwen2.5:7b-instruct pulled.
@@ -38,7 +47,12 @@ TIMEFRAME = "1h"
 HIGHER_TIMEFRAME = "1d"
 LOWER_TIMEFRAME = "5m"
 SINCE, UNTIL = "2023-09-13", "2026-09-13"
-N_CANDLES = 24  # ~2 hours of 5-min context ("puede ser varias horas atrás")
+N_CANDLES = 300  # fixed window, matching the engine's own lookback_bars convention
+
+# Trade fields already computed by our own deterministic pieces, passed
+# through to the LLM as its analysis context (see llm_score.format_context)
+# instead of asking it to read raw candles in a vacuum.
+CONTEXT_FIELDS = ["pattern", "context_trend", "higher_tf_trend", "fib_ratio", "volume_bias"]
 
 STRATEGY_PATH = "config/strategies/trend_pullback_htf_confluence.yaml"
 
@@ -64,7 +78,8 @@ def main() -> None:
     for _, trade in full_log.iterrows():
         lower_tf = lower_tf_by_market[trade["market"]]
         window = lower_tf[lower_tf["timestamp"] < trade["entry_time"]].tail(N_CANDLES)
-        scores.append(score_candles(window) if len(window) == N_CANDLES else None)
+        context = {field: trade[field] for field in CONTEXT_FIELDS if field in trade.index}
+        scores.append(score_candles(window, context=context) if len(window) == N_CANDLES else None)
     full_log["llm_score"] = scores
 
     n_scored = full_log["llm_score"].notna().sum()
