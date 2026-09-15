@@ -56,8 +56,14 @@ def main() -> None:
         print(f"standard (close-based) entries: {len(standard_entries)}")
 
         if not standard_entries.empty:
+            # hour_timestamp is the bar's OPEN, not its close - "minutes
+            # earlier" has to be measured against when the bar actually
+            # closes (open + the parent timeframe's own duration), not
+            # against its open (every intrabar fire is trivially after the
+            # open, so that comparison was always negative and meaningless).
+            parent_interval = parent_df["timestamp"].iloc[1] - parent_df["timestamp"].iloc[0]
             minutes_earlier = (
-                standard_entries["hour_timestamp"] - standard_entries["intrabar_fire_time"]
+                (standard_entries["hour_timestamp"] + parent_interval) - standard_entries["intrabar_fire_time"]
             ).dt.total_seconds() / 60
             price_diff_pct = (
                 (standard_entries["intrabar_fire_price"] - standard_entries["close_price"])
@@ -66,8 +72,8 @@ def main() -> None:
             )
             print(f"  of these, intrabar signal also found: {standard_entries['intrabar_signal'].sum()} "
                   f"(should equal the total above if every hour had full 5m coverage)")
-            print(f"  avg minutes earlier the entry could have fired: {minutes_earlier.mean():.1f} "
-                  f"(median {minutes_earlier.median():.1f})")
+            print(f"  avg minutes earlier the entry could have fired (vs. waiting for the close): "
+                  f"{minutes_earlier.mean():.1f} (median {minutes_earlier.median():.1f})")
             print(f"  avg entry price difference vs. waiting for the close: {price_diff_pct.mean():.3f}% "
                   f"(negative = a better, lower price)")
 

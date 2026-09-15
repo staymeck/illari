@@ -64,6 +64,17 @@ def test_experiment_report_known_values():
     assert report["profit_factor"] == round((2.0 + 0.5) / (1.0 + 1.0), 2)
 
 
+def test_experiment_report_works_on_a_trade_log_too():
+    # build_trade_log drops pnl_pct (not part of its column set) - make
+    # sure experiment_report still works on its output, not just raw trades.
+    log = build_trade_log(_trades(), market="BTC/USDT", tf_execution="1h")
+
+    report = experiment_report(log)
+
+    assert report["n_trades"] == 4
+    assert report["expectancy_r"] == round((2.0 - 1.0 + 0.5 - 1.0) / 4, 3)
+
+
 def test_experiment_report_empty():
     report = experiment_report(pd.DataFrame())
 
