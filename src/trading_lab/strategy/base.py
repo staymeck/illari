@@ -19,6 +19,11 @@ class Signal:
     hour_utc: int
     session: str
     reasons: dict = field(default_factory=dict)
+    # Multiplies `risk_per_trade_pct` at execution time (see backtest/engine.py).
+    # Default 1.0 = no change from existing fixed-fraction sizing. Strategies
+    # only set this away from 1.0 when `dynamic_risk_enabled` scales it by
+    # the current volatility regime (see indicators/volatility.py).
+    risk_multiplier: float = 1.0
 
 
 class Strategy(ABC):

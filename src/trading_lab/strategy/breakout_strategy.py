@@ -23,6 +23,19 @@ ignored entirely — any breakout counts (with or without `fade`), not only
 ones aligned with the day's trend. Used to compare whether the daily bias
 was actually helping or diluting the signal.
 
+`dynamic_stop_enabled` / `dynamic_risk_enabled` (both default `false`):
+same mechanism as in `confluence_strategy.py` — scale the stop distance /
+position size by the current volatility regime (current ATR vs. its own
+recent average) instead of a fixed `atr_sl_multiplier` and a fixed
+`risk_per_trade_pct`. This strategy is where the gap mattered most: the
+probability analysis found a statistically significant directional edge in
+`fade`'s signals (p≈0, hit rate 57-62% vs. a ~50% base rate over a 1h
+horizon), yet every `fade` variant still lost almost all its capital when
+actually traded — because the fixed 1.5xATR stop, placed right at the
+breakout (the single noisiest moment for this setup), got hit by normal
+retracement before the validated 1h move had time to develop. `fade`
+combined with `dynamic_stop_enabled` targets exactly that mismatch.
+
 Three OPTIONAL filters (disabled by default, so already-run variants keep
 their behavior), specifically aimed at over-trading on short timeframes:
   - `min_channel_width_atr_mult`: only counts a breakout if the channel
@@ -168,17 +181,37 @@ class DonchianBreakoutStrategy(Strategy):
             if row.get("prior_bar_narrow_range") is not True:
                 return None
 
+        # Dynamic stop/sizing: same volatility-regime mechanism as
+        # confluence_strategy.py, reusing the atr_sma already computed for
+        # the (coincident) volatility_expansion_required filter.
+        atr_sma = row.get("atr_sma")
+        regime_ratio = (atr / atr_sma) if (atr_sma and atr_sma > 0) else None
+
+        sl_multiplier = sp["atr_sl_multiplier"]
+        if sp.get("dynamic_stop_enabled", False):
+            regime = volatility.regime_multiplier_scalar(
+                regime_ratio, sp.get("dynamic_stop_min_mult", 0.75), sp.get("dynamic_stop_max_mult", 2.0)
+            )
+            sl_multiplier = sl_multiplier * regime
+
         if direction == "long":
-            stop_loss = close - sp["atr_sl_multiplier"] * atr
+            stop_loss = close - sl_multiplier * atr
             risk = close - stop_loss
             take_profit = close + sp["reward_risk_ratio"] * risk
         else:
-            stop_loss = close + sp["atr_sl_multiplier"] * atr
+            stop_loss = close + sl_multiplier * atr
             risk = stop_loss - close
             take_profit = close - sp["reward_risk_ratio"] * risk
 
         if risk <= 0:
             return None
+
+        risk_multiplier = 1.0
+        if sp.get("dynamic_risk_enabled", False):
+            regime = volatility.regime_multiplier_scalar(
+                regime_ratio, sp.get("dynamic_stop_min_mult", 0.75), sp.get("dynamic_stop_max_mult", 2.0)
+            )
+            risk_multiplier = 1.0 / regime if regime > 0 else 1.0
 
         confidence = 2  # channel breakout (+ daily bias aligned, if `require_bias_alignment`)
         reasons = {"bias_trend": bias_trend, "breakout": direction}
@@ -192,6 +225,10 @@ class DonchianBreakoutStrategy(Strategy):
             reasons["volatility_expansion_required"] = True
         if sp.get("narrow_range_required", False):
             reasons["narrow_range_required"] = True
+        if sp.get("dynamic_stop_enabled", False):
+            reasons["dynamic_stop"] = True
+        if sp.get("dynamic_risk_enabled", False):
+            reasons["dynamic_risk"] = True
 
         volume_ratio = row.get("volume_ratio")
         if volume_ratio is not None and pd.notna(volume_ratio) and volume_ratio > 1.2:
@@ -209,4 +246,5 @@ class DonchianBreakoutStrategy(Strategy):
             hour_utc=int(row["hour_utc"]),
             session=row["session"],
             reasons=reasons,
+            risk_multiplier=float(risk_multiplier),
         )

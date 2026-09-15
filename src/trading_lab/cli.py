@@ -43,16 +43,29 @@ def load_config(path: Path) -> dict:
         return yaml.safe_load(f)
 
 
-def fetch_scenario_data(cfg: dict, scenario: dict) -> ScenarioData:
-    """Downloads (or reads from cache) the candles for the 3 timeframes for
-    a scenario, with enough extra history before the start so structure/
-    bias already have confirmed swings from day one."""
-    exchange_id, pair, tf = cfg["exchange"], cfg["pair"], cfg["timeframes"]
-    name = scenario["name"]
-    start = _parse_ts(scenario["start"]).to_pydatetime()
-    end = _parse_ts(scenario["end"]).to_pydatetime()
+def resolve_scenario_window(scenario: dict, market: dict) -> tuple[pd.Timestamp, pd.Timestamp]:
+    """A market can override a scenario's start/end date
+    (`market["scenario_overrides"][scenario_name]`) for assets without
+    full history on Binance for that period (e.g. PAXG, listed 2020-08-28,
+    doesn't cover mixed_volatility_2019_2022's default 2019-07-01 start) —
+    runs with its own real, shorter window instead of requesting data that
+    doesn't exist."""
+    override = (market.get("scenario_overrides") or {}).get(scenario["name"], {})
+    start = _parse_ts(override.get("start", scenario["start"]))
+    end = _parse_ts(override.get("end", scenario["end"]))
+    return start, end
 
-    print(f"[{name}] downloading data ({pair}, {start.date()} -> {end.date()})...")
+
+def fetch_scenario_data(cfg: dict, scenario: dict, market: dict) -> ScenarioData:
+    """Downloads (or reads from cache) the candles for the 3 timeframes for
+    a scenario on one market/pair, with enough extra history before the
+    start so structure/bias already have confirmed swings from day one."""
+    exchange_id, pair, tf = cfg["exchange"], market["pair"], cfg["timeframes"]
+    name = scenario["name"]
+    start, end = resolve_scenario_window(scenario, market)
+    start, end = start.to_pydatetime(), end.to_pydatetime()
+
+    print(f"[{market['name']}][{name}] downloading data ({pair}, {start.date()} -> {end.date()})...")
 
     entry_df = get_ohlcv(exchange_id, pair, tf["entry"], start, end, f"{name}_entry")
     structure_df = get_ohlcv(
@@ -61,9 +74,9 @@ def fetch_scenario_data(cfg: dict, scenario: dict) -> ScenarioData:
     bias_df = get_ohlcv(exchange_id, pair, tf["bias"], start - timedelta(days=BIAS_BUFFER_DAYS), end, f"{name}_bias")
 
     if entry_df.empty or structure_df.empty or bias_df.empty:
-        raise RuntimeError(f"[{name}] not enough data was obtained — check the date range and connection.")
+        raise RuntimeError(f"[{market['name']}][{name}] not enough data was obtained — check the date range and connection.")
 
-    print(f"[{name}] candles: entry={len(entry_df)} structure={len(structure_df)} bias={len(bias_df)}")
+    print(f"[{market['name']}][{name}] candles: entry={len(entry_df)} structure={len(structure_df)} bias={len(bias_df)}")
     return entry_df, structure_df, bias_df
 
 
@@ -72,7 +85,7 @@ def _prepare_chart_and_probability_inputs(
     entry_df: pd.DataFrame,
     structure_df: pd.DataFrame,
     bias_df: pd.DataFrame,
-    scenario: dict,
+    window_start: pd.Timestamp,
     cfg: dict,
     variant_params: dict,
 ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
@@ -85,13 +98,14 @@ def _prepare_chart_and_probability_inputs(
 
     if strategy_class == "confluence":
         entry_for_chart = confluence_strategy.prepare_entry_df(
-            entry_df, variant_params["volume_lookback"], variant_params["volume_min_ratio"], variant_params["atr_period"]
+            entry_df, variant_params["volume_lookback"], variant_params["volume_min_ratio"], variant_params["atr_period"],
+            variant_params.get("atr_expansion_lookback", 20),
         )
         structure_for_chart = confluence_strategy.prepare_structure_df(
             structure_df, variant_params["swing_lookback"], variant_params["fib_zone_min"], variant_params["fib_zone_max"],
             variant_params.get("trendline_min_points", 3), variant_params.get("trendline_max_points", 6),
         )
-        structure_for_chart = structure_for_chart[structure_for_chart["timestamp"] >= _parse_ts(scenario["start"])]
+        structure_for_chart = structure_for_chart[structure_for_chart["timestamp"] >= window_start]
         merged = confluence_strategy.prepare_merged(
             entry_df, structure_df, bias_df, {"timeframes": timeframes, "strategy": variant_params}
         )
@@ -113,14 +127,22 @@ def _prepare_chart_and_probability_inputs(
     raise ValueError(f"Unknown strategy_class: '{strategy_class}'")
 
 
-def cmd_backtest(args: argparse.Namespace) -> None:
+def _run_market_backtest(cfg: dict, market: dict, reports_dir: Path) -> tuple[pd.DataFrame, Path]:
+    """Runs every strategy × variant × scenario for ONE market, writes that
+    market's own detailed report (unchanged shape from the single-market
+    version: metrics, hour/session breakdown, probability tables, charts),
+    and returns its sweep rows (tagged with `market`) plus the report path,
+    so `cmd_backtest` can build a cross-market summary on top."""
     from trading_lab.viz.charts import build_equity_curve_chart, build_scenario_chart
 
-    cfg = load_config(Path(args.config))
-    reports_dir = Path(args.reports_dir)
+    market_name = market["name"]
+    market_reports_dir = reports_dir / market_name
 
     data_by_scenario: dict[str, ScenarioData] = {
-        scenario["name"]: fetch_scenario_data(cfg, scenario) for scenario in cfg["scenarios"]
+        scenario["name"]: fetch_scenario_data(cfg, scenario, market) for scenario in cfg["scenarios"]
+    }
+    window_start_by_scenario = {
+        scenario["name"]: resolve_scenario_window(scenario, market)[0] for scenario in cfg["scenarios"]
     }
 
     sweep_rows: list[dict] = []
@@ -150,7 +172,7 @@ def cmd_backtest(args: argparse.Namespace) -> None:
                 summary = metrics.summarize(result, cfg["initial_capital"])
                 sweep_rows.append({"variant": display_name, "scenario": scenario_name, **summary})
                 print(
-                    f"[{scenario_name}][{display_name}] trades={summary['n_trades']} "
+                    f"[{market_name}][{scenario_name}][{display_name}] trades={summary['n_trades']} "
                     f"win_rate={summary['win_rate_pct']}% pf={summary['profit_factor']} "
                     f"return={summary['total_return_pct']}%"
                 )
@@ -178,17 +200,18 @@ def cmd_backtest(args: argparse.Namespace) -> None:
             entry_df, structure_df, bias_df = data_by_scenario[name]
 
             entry_for_chart, structure_for_chart, merged = _prepare_chart_and_probability_inputs(
-                meta["strategy_class"], entry_df, structure_df, bias_df, scenario, cfg, variant_params
+                meta["strategy_class"], entry_df, structure_df, bias_df, window_start_by_scenario[name], cfg, variant_params
             )
 
-            scenario_dir = reports_dir / name / display_name.replace("/", "_")
+            scenario_dir = market_reports_dir / name / display_name.replace("/", "_")
             trades_df = metrics.trades_to_df(detailed_results[display_name][name].trades)
             candles_path = build_scenario_chart(
-                entry_for_chart, structure_for_chart, trades_df, f"{name} — {display_name}", cfg["pair"],
+                entry_for_chart, structure_for_chart, trades_df, f"{market_name} — {name} — {display_name}", market["pair"],
                 scenario_dir / "chart_5m.html",
             )
             equity_path = build_equity_curve_chart(
-                detailed_results[display_name][name].equity_curve, f"{name} — {display_name}", scenario_dir / "equity.html"
+                detailed_results[display_name][name].equity_curve,
+                f"{market_name} — {name} — {display_name}", scenario_dir / "equity.html",
             )
             chart_paths[display_name][name] = {"candles": candles_path, "equity": equity_path}
 
@@ -200,18 +223,40 @@ def cmd_backtest(args: argparse.Namespace) -> None:
                 detailed_signals[display_name][name], entry_for_chart, horizon
             )
 
-            print(f"[{name}][{display_name}] probability computed, charts generated.")
+            print(f"[{market_name}][{name}][{display_name}] probability computed, charts generated.")
 
     report_path = report.build_report(
         detailed_results,
         cfg["initial_capital"],
         chart_paths,
-        reports_dir / "report.md",
+        market_reports_dir / "report.md",
         probability_tables=probability_tables,
         signal_hit_tables=signal_hit_tables,
         sweep_df=sweep_df,
+        title=f"Backtest report — {market_name} ({market['pair']})",
     )
-    print(f"\nReport generated: {report_path}")
+    print(f"[{market_name}] report generated: {report_path}")
+
+    sweep_df.insert(0, "market", market_name)
+    return sweep_df, report_path
+
+
+def cmd_backtest(args: argparse.Namespace) -> None:
+    cfg = load_config(Path(args.config))
+    reports_dir = Path(args.reports_dir)
+
+    all_sweep_rows: list[pd.DataFrame] = []
+    market_report_paths: dict[str, Path] = {}
+
+    for market in cfg["markets"]:
+        print(f"\n=== Market: {market['name']} ({market['pair']}) ===")
+        market_sweep_df, market_report_path = _run_market_backtest(cfg, market, reports_dir)
+        all_sweep_rows.append(market_sweep_df)
+        market_report_paths[market["name"]] = market_report_path
+
+    all_sweep_df = pd.concat(all_sweep_rows, ignore_index=True) if all_sweep_rows else pd.DataFrame()
+    summary_path = report.build_cross_market_summary(all_sweep_df, reports_dir / "report.md", market_report_paths)
+    print(f"\nCross-market summary generated: {summary_path}")
 
 
 def build_parser() -> argparse.ArgumentParser:

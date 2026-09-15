@@ -2,7 +2,37 @@
 # All dates are UTC, ISO 8601 format.
 
 exchange: binance
-pair: BTC/USDT
+
+# 5 markets, deliberately varied (arbitrariness on purpose, so a result
+# isn't just "one asset's quirk" wearing different names) — all on Binance,
+# no new data infrastructure needed:
+#   - BTC, ETH: the two crypto blue chips, different underlying dynamics
+#     (store-of-value narrative vs. smart-contract/DeFi platform).
+#   - PAXG: tokenized gold — the only one that isn't crypto-sentiment-driven,
+#     historically far less volatile and more tied to macro factors.
+#   - BNB: higher-beta altcoin, and (chosen over SOL) has full history on
+#     Binance since 2017 -- covers both scenarios below without a shortened
+#     window, unlike SOL (listed 2020-08-11).
+#   - DOGE: known for moving more on sentiment/social media than
+#     "fundamentals" -- a genuinely different market dynamic to test.
+markets:
+  - name: BTC
+    pair: BTC/USDT
+  - name: ETH
+    pair: ETH/USDT
+  - name: PAXG
+    pair: PAXG/USDT
+    # Only listed on Binance since 2020-08-28 -- doesn't cover the 2019
+    # range or the 2020 COVID crash portion of mixed_volatility_2019_2022.
+    # Runs that scenario with its own (shorter, real) start date instead of
+    # requesting data that doesn't exist.
+    scenario_overrides:
+      mixed_volatility_2019_2022:
+        start: "2020-08-28T00:00:00Z"
+  - name: BNB
+    pair: BNB/USDT
+  - name: DOGE
+    pair: DOGE/USDT
 
 # Timeframes used in the top-down multi-timeframe analysis.
 timeframes:
@@ -13,7 +43,8 @@ timeframes:
 # Two 36-month historical scenarios with different market conditions
 # (extended from 12 months to give variants with few signals — e.g.
 # confluence/geometry_1.5x — a better chance of reaching a statistically
-# significant sample). Not "magic" dates, just illustrative.
+# significant sample). Not "magic" dates, just illustrative. Per-market
+# adjustments (for assets without full history) are in `markets` above.
 scenarios:
   - name: bull_trend_2023_2025
     description: "Background bull trend 2023-2025 (recovery + new highs)"
@@ -59,6 +90,17 @@ strategies:
       atr_period: 14
       atr_sl_multiplier: 1.5
       reward_risk_ratio: 2.0
+
+      # Dynamic stop/sizing (both disabled by default, so existing variants
+      # keep their exact prior behavior) — see strategy/confluence_strategy.py
+      # docstring and indicators/volatility.py::regime_multiplier. Scales
+      # atr_sl_multiplier / risk_per_trade_pct by how expanded or contracted
+      # current volatility is relative to its own recent average.
+      dynamic_stop_enabled: false
+      dynamic_risk_enabled: false
+      atr_expansion_lookback: 20   # window for the volatility regime's own moving average
+      dynamic_stop_min_mult: 0.75  # floor of the regime multiplier (tightest allowed adjustment)
+      dynamic_stop_max_mult: 2.0   # ceiling of the regime multiplier (widest allowed adjustment)
 
       # Costs (backtest realism)
       commission_pct: 0.1        # commission per side (Binance spot ~0.1%)
@@ -114,12 +156,17 @@ strategies:
           trendline_proximity_atr_mult: 2.5
 
       - name: geometry_2.5x_min2
-        description: "Same as geometry_2.5x, but the line can be fit with only 2 swings (instead of 3) -> available sooner, even more signals"
-        detailed: true
+        description: "Same as geometry_2.5x, but the line can be fit with only 2 swings (instead of 3) -> available sooner, even more signals. Not marked detailed: prior single-market run showed identical results to geometry_2.5x -- kept in the sweep ranking only, to avoid 5x redundant charts across markets."
         overrides:
           trendline_required: true
           trendline_proximity_atr_mult: 2.5
           trendline_min_points: 2
+
+      - name: dynamic_stop
+        description: "Same as base, but the ATR stop/position size scale with the current volatility regime instead of being fixed (see backtest report's discussion of why the fixed stop was getting hit by ordinary noise)"
+        detailed: true
+        overrides:
+          dynamic_stop_enabled: true
 
   - name: breakout_donchian
     strategy_class: breakout  # see trading_lab/strategy/registry.py
@@ -144,6 +191,16 @@ strategies:
       volatility_expansion_required: false   # coincident filter (expansion already underway)
       narrow_range_lookback: 7               # classic NR7 (Crabel)
       narrow_range_required: false           # anticipatory filter (compression before the move)
+
+      # Dynamic stop/sizing (both disabled by default) — see
+      # strategy/breakout_strategy.py docstring for why this mattered most
+      # here: fade's signals had a statistically significant edge that a
+      # fixed 1.5xATR stop, placed right at the noisiest moment (the
+      # breakout itself), destroyed in execution.
+      dynamic_stop_enabled: false
+      dynamic_risk_enabled: false
+      dynamic_stop_min_mult: 0.75
+      dynamic_stop_max_mult: 2.0
 
     variants:
       - name: base
@@ -187,6 +244,12 @@ strategies:
           min_channel_width_atr_mult: 2.0
           volatility_expansion_required: true
 
+      - name: dynamic_stop
+        description: "Same as base (follows the breakout), but with the volatility-regime-scaled stop/size instead of fixed"
+        detailed: true
+        overrides:
+          dynamic_stop_enabled: true
+
       # --- Fade: invert the breakout, exploiting the NEGATIVE edge that the
       # probability analysis confirmed with statistical significance (p≈0
       # in both 36-month scenarios) in the base variant's signals — instead
@@ -198,8 +261,7 @@ strategies:
           fade: true
 
       - name: fade_no_bias
-        description: "Fade without requiring alignment with the daily bias -> any breakout is traded against, more signals (compares whether the bias helped or diluted the edge)"
-        detailed: true
+        description: "Fade without requiring alignment with the daily bias -> any breakout is traded against, more signals (compares whether the bias helped or diluted the edge). Not marked detailed: prior single-market run showed the most extreme over-trading (6000+ trades) with no better result than fade_base -- kept in the sweep ranking only."
         overrides:
           fade: true
           require_bias_alignment: false
@@ -216,6 +278,24 @@ strategies:
         overrides:
           fade: true
           reward_risk_ratio: 1.0
+
+      # --- The combination the probability analysis actually points to:
+      # fade's direction has a real, significant edge (p≈0); dynamic_stop
+      # targets the fixed-stop/noise mismatch that was destroying it. ---
+      - name: fade_dynamic_stop
+        description: "Fade + volatility-regime-scaled stop (wider right at the breakout, the noisiest moment for this setup) instead of a fixed 1.5xATR stop"
+        detailed: true
+        overrides:
+          fade: true
+          dynamic_stop_enabled: true
+
+      - name: fade_dynamic_stop_and_risk
+        description: "Same as fade_dynamic_stop, plus position size scaled down when volatility (and uncertainty) is elevated instead of a fixed 1% of equity"
+        detailed: true
+        overrides:
+          fade: true
+          dynamic_stop_enabled: true
+          dynamic_risk_enabled: true
 
 # Simulated initial capital for the backtest.
 initial_capital: 10000

@@ -19,6 +19,15 @@ confluence quality (strong volume, a more decisive pattern like engulfing,
 proximity to the line if it wasn't required as a condition). All the
 per-entry-candle computation only uses 1h/1D data already closed at that
 point (see `data/mtf_align.py`).
+
+`dynamic_stop_enabled` / `dynamic_risk_enabled` (both default `false`):
+scale the stop distance / position size by the current volatility regime
+(current ATR vs. its own recent average, see
+`indicators/volatility.py::regime_multiplier`) instead of a fixed
+`atr_sl_multiplier` and a fixed `risk_per_trade_pct`. Added after finding
+that a fixed-distance stop gets hit by ordinary short-term noise before a
+statistically real directional edge has time to play out (see
+breakout_strategy.py's `fade` for where this mattered most).
 """
 
 from __future__ import annotations
@@ -91,9 +100,16 @@ def prepare_bias_df(df: pd.DataFrame, swing_lookback: int) -> pd.DataFrame:
     return out
 
 
-def prepare_entry_df(df: pd.DataFrame, volume_lookback: int, volume_min_ratio: float, atr_period: int) -> pd.DataFrame:
-    """Computes candle patterns, volume sufficiency, ATR, and hour/session
-    on the entry timeframe (5m)."""
+def prepare_entry_df(
+    df: pd.DataFrame,
+    volume_lookback: int,
+    volume_min_ratio: float,
+    atr_period: int,
+    atr_expansion_lookback: int = 20,
+) -> pd.DataFrame:
+    """Computes candle patterns, volume sufficiency, ATR (+ its own moving
+    average, for the volatility regime used by the dynamic stop/sizing),
+    and hour/session on the entry timeframe (5m)."""
     out = df.copy()
     out["confirm_bullish"] = candles.bullish_confirmation(out)
     out["confirm_bearish"] = candles.bearish_confirmation(out)
@@ -102,6 +118,7 @@ def prepare_entry_df(df: pd.DataFrame, volume_lookback: int, volume_min_ratio: f
     out["volume_ok"] = volume.is_volume_sufficient(out, volume_lookback, volume_min_ratio)
     out["volume_ratio"] = volume.volume_ratio(out, volume_lookback)
     out["atr"] = volatility.atr(out, atr_period)
+    out["volatility_regime"] = volatility.volatility_regime_ratio(out["atr"], atr_expansion_lookback)
     out = session.add_session_columns(out)
     return out
 
@@ -118,7 +135,9 @@ def prepare_merged(
     bias_tf = params["timeframes"]["bias"]
     sp = params["strategy"]
 
-    prepared_entry = prepare_entry_df(entry_df, sp["volume_lookback"], sp["volume_min_ratio"], sp["atr_period"])
+    prepared_entry = prepare_entry_df(
+        entry_df, sp["volume_lookback"], sp["volume_min_ratio"], sp["atr_period"], sp.get("atr_expansion_lookback", 20)
+    )
     prepared_structure = prepare_structure_df(
         structure_df,
         sp["swing_lookback"],
@@ -177,21 +196,48 @@ class ConfluenceStrategy(Strategy):
             return None
 
         atr = row.get("atr") or 0.0
+
+        # Dynamic stop: scales atr_sl_multiplier by the current volatility
+        # regime (current ATR vs. its own recent average) instead of using
+        # a fixed multiplier — wider when volatility is expanded (so
+        # ordinary noise doesn't trigger it before the move plays out),
+        # tighter when it's calm. Only applies to the ATR-based stop, not
+        # the structural one (a swing high/low is already a market-defined
+        # level, not an arbitrary distance).
+        sl_multiplier = sp["atr_sl_multiplier"]
+        if sp.get("dynamic_stop_enabled", False):
+            regime = volatility.regime_multiplier_scalar(
+                row.get("volatility_regime"), sp.get("dynamic_stop_min_mult", 0.75), sp.get("dynamic_stop_max_mult", 2.0)
+            )
+            sl_multiplier = sl_multiplier * regime
+
         if direction == "long":
             structural_stop = swing_low if pd.notna(swing_low) else None
             use_structural = structural_stop is not None and structural_stop < close
-            stop_loss = structural_stop if use_structural else close - sp["atr_sl_multiplier"] * atr
+            stop_loss = structural_stop if use_structural else close - sl_multiplier * atr
             risk = close - stop_loss
             take_profit = close + sp["reward_risk_ratio"] * risk
         else:
             structural_stop = swing_high if pd.notna(swing_high) else None
             use_structural = structural_stop is not None and structural_stop > close
-            stop_loss = structural_stop if use_structural else close + sp["atr_sl_multiplier"] * atr
+            stop_loss = structural_stop if use_structural else close + sl_multiplier * atr
             risk = stop_loss - close
             take_profit = close - sp["reward_risk_ratio"] * risk
 
         if risk <= 0:
             return None
+
+        # Dynamic sizing: the INVERSE of the same regime multiplier — risk
+        # less capital when volatility (and uncertainty) is elevated, the
+        # normal amount when it's calm. Deliberately based on market state,
+        # not on the strategy's own recent win/loss streak (see the report
+        # discussion on why streak-based sizing is not used here).
+        risk_multiplier = 1.0
+        if sp.get("dynamic_risk_enabled", False):
+            regime = volatility.regime_multiplier_scalar(
+                row.get("volatility_regime"), sp.get("dynamic_stop_min_mult", 0.75), sp.get("dynamic_stop_max_mult", 2.0)
+            )
+            risk_multiplier = 1.0 / regime if regime > 0 else 1.0
 
         # Analytic geometry: is the price close (within
         # trendline_proximity_atr_mult * ATR) to the least-squares support
@@ -216,6 +262,10 @@ class ConfluenceStrategy(Strategy):
         if sp.get("trendline_required", False):
             confidence += 1  # geometry became the 5th mandatory condition
             reasons["geometry_required"] = True
+        if sp.get("dynamic_stop_enabled", False):
+            reasons["dynamic_stop"] = True
+        if sp.get("dynamic_risk_enabled", False):
+            reasons["dynamic_risk"] = True
 
         if row.get("volume_ratio", 1.0) and row["volume_ratio"] > 1.5:
             confidence += 1
@@ -243,4 +293,5 @@ class ConfluenceStrategy(Strategy):
             hour_utc=int(row["hour_utc"]),
             session=row["session"],
             reasons=reasons,
+            risk_multiplier=float(risk_multiplier),
         )

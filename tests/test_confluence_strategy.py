@@ -171,6 +171,84 @@ def test_trendline_required_filters_out_signal_without_nearby_line():
     assert signals == []
 
 
+def _minimal_long_row(**overrides) -> pd.Series:
+    """A row with just enough fields to reach the ATR-based stop branch of
+    `_evaluate_row` (no structural stop available), for testing dynamic
+    stop/sizing in isolation from the rest of the confluence conditions."""
+    base = {
+        "timestamp": pd.Timestamp("2024-01-07T06:00:00Z"),
+        "bias_trend": "up",
+        "struct_trend": "up",
+        "struct_zone_lo": 90.0,
+        "struct_zone_hi": 110.0,
+        "struct_swing_low_level": float("nan"),
+        "struct_swing_high_level": float("nan"),
+        "close": 100.0,
+        "volume_ok": True,
+        "confirm_bullish": True,
+        "confirm_bearish": False,
+        "is_engulfing_bull": False,
+        "is_engulfing_bear": False,
+        "atr": 10.0,
+        "volatility_regime": 1.0,
+        "struct_dist_to_support": float("nan"),
+        "struct_dist_to_resistance": float("nan"),
+        "volume_ratio": 1.0,
+        "hour_utc": 5,
+        "session": "asia",
+    }
+    base.update(overrides)
+    return pd.Series(base)
+
+
+def test_dynamic_stop_widens_with_expanded_volatility_regime():
+    from trading_lab.strategy.confluence_strategy import ConfluenceStrategy
+
+    sp = {**PARAMS["strategy"], "dynamic_stop_enabled": True}
+    # regime=2.0 is exactly the default dynamic_stop_max_mult -> multiplier stays 2.0 (no extra clipping to verify).
+    row = _minimal_long_row(volatility_regime=2.0)
+
+    sig = ConfluenceStrategy._evaluate_row(row, sp)
+
+    # stop = close - (atr_sl_multiplier * regime) * atr = 100 - (1.5*2.0)*10 = 70.
+    assert sig.stop_loss == pytest.approx(100.0 - 1.5 * 2.0 * 10.0)
+    assert sig.reasons["dynamic_stop"] is True
+
+
+def test_dynamic_stop_disabled_ignores_volatility_regime():
+    from trading_lab.strategy.confluence_strategy import ConfluenceStrategy
+
+    sp = {**PARAMS["strategy"], "dynamic_stop_enabled": False}
+    row = _minimal_long_row(volatility_regime=2.0)  # same expanded regime, should be ignored
+
+    sig = ConfluenceStrategy._evaluate_row(row, sp)
+
+    assert sig.stop_loss == pytest.approx(100.0 - 1.5 * 10.0)
+    assert "dynamic_stop" not in sig.reasons
+
+
+def test_dynamic_risk_reduces_position_risk_when_volatility_expanded():
+    from trading_lab.strategy.confluence_strategy import ConfluenceStrategy
+
+    sp = {**PARAMS["strategy"], "dynamic_risk_enabled": True}
+    row = _minimal_long_row(volatility_regime=2.0)
+
+    sig = ConfluenceStrategy._evaluate_row(row, sp)
+
+    assert sig.risk_multiplier == pytest.approx(0.5)  # 1 / regime(2.0)
+    assert sig.reasons["dynamic_risk"] is True
+
+
+def test_default_risk_multiplier_is_one_when_dynamic_risk_disabled():
+    from trading_lab.strategy.confluence_strategy import ConfluenceStrategy
+
+    row = _minimal_long_row(volatility_regime=2.0)
+
+    sig = ConfluenceStrategy._evaluate_row(row, PARAMS["strategy"])
+
+    assert sig.risk_multiplier == pytest.approx(1.0)
+
+
 def test_confluence_strategy_no_signal_without_trend_alignment():
     # If the daily bias never reaches 'up' (data cut before it's
     # confirmed), no signal should be generated even if every other

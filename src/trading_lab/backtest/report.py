@@ -34,6 +34,7 @@ def build_report(
     probability_tables: NestedTables | None = None,
     signal_hit_tables: NestedTables | None = None,
     sweep_df: pd.DataFrame | None = None,
+    title: str = "Backtest report — Trading lab",
 ) -> Path:
     """`chart_paths[display_name][scenario]` = {"candles": Path, "equity": Path},
     where `display_name` is "<strategy>/<variant>" for each combination
@@ -41,12 +42,13 @@ def build_report(
     (optional): [display_name][scenario] -> output of `analysis/probability.py`.
     `sweep_df` (optional): output of `backtest/sweep.py::run_sweep`, already
     with every strategy × variant × scenario (row names
-    "<strategy>/<variant>").
+    "<strategy>/<variant>"). `title` (optional): lets a per-market report
+    (see `build_cross_market_summary`) identify itself in its own heading.
     """
     probability_tables = probability_tables or {}
     signal_hit_tables = signal_hit_tables or {}
 
-    lines: list[str] = ["# Backtest report — Trading lab\n"]
+    lines: list[str] = [f"# {title}\n"]
 
     if sweep_df is not None and not sweep_df.empty:
         lines.append("## Configuration comparison (all strategies)\n")
@@ -128,6 +130,77 @@ def build_report(
                     "significance test.\n"
                 )
                 lines.append(_df_to_markdown_table(hit_table) + "\n")
+
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text("\n".join(lines), encoding="utf-8")
+    return output_path
+
+
+def build_cross_market_summary(
+    all_sweep_df: pd.DataFrame,
+    output_path: Path,
+    market_report_paths: dict[str, Path],
+) -> Path:
+    """Top-level report, one level above each market's own detailed report
+    (`build_report`, which keeps its full per-strategy detail — charts,
+    hour/session breakdown, probability tables — scoped to a single
+    market). `all_sweep_df`: every market × strategy/variant × scenario row
+    (output of `cli.py::_run_market_backtest`, `sweep_df` with a `market`
+    column prepended). `market_report_paths`: market name -> its own
+    report.md path, to link out to the full detail.
+    """
+    lines: list[str] = ["# Trading lab — cross-market summary\n"]
+
+    if all_sweep_df is None or all_sweep_df.empty:
+        lines.append("_No data._\n")
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_text("\n".join(lines), encoding="utf-8")
+        return output_path
+
+    markets = sorted(all_sweep_df["market"].unique())
+    lines.append(
+        f"Every strategy/variant combination run against **{len(markets)} markets** "
+        f"({', '.join(markets)}) × both scenarios — arbitrariness on purpose, so a "
+        "result isn't just one asset's quirk wearing different names. Each market's "
+        "own report keeps the full detail (charts, hour/session breakdown, "
+        "per-ingredient probability tables); this page only compares across all of "
+        "them.\n"
+    )
+
+    lines.append("## Per-market reports\n")
+    for market_name in markets:
+        path = market_report_paths.get(market_name)
+        if path is not None:
+            lines.append(f"- [{market_name}]({path.relative_to(output_path.parent).as_posix()})")
+    lines.append("")
+
+    lines.append("## Full comparison (every market × variant × scenario)\n")
+    pivot_cols = ["market", "variant", "scenario", "n_trades", "win_rate_pct", "profit_factor", "total_return_pct", "max_drawdown_pct"]
+    lines.append(_df_to_markdown_table(all_sweep_df[pivot_cols]) + "\n")
+
+    lines.append("## Cross-market consistency ranking (worst case across ALL markets × scenarios)\n")
+    lines.append(
+        "The strictest version of the consistency ranking: for each strategy/variant, "
+        "this takes the single WORST result among every market × scenario combination "
+        "it ran on — not just the worst of 2 scenarios on 1 market, but the worst of "
+        "up to 10 combinations. A configuration that looks good here had to hold up "
+        "across genuinely different assets, not just different time periods of the "
+        "same one.\n"
+    )
+    ranking = sweep_module.rank_variants_by_consistency(all_sweep_df)
+    lines.append(_df_to_markdown_table(ranking) + "\n")
+
+    lines.append("## Per-market consistency ranking\n")
+    lines.append(
+        "Same ranking, but computed separately within each market (worst case across "
+        "its own 2 scenarios only) — useful to see whether a variant's cross-market "
+        "ranking above is being dragged down by one specific asset rather than failing "
+        "everywhere.\n"
+    )
+    for market_name in markets:
+        lines.append(f"### {market_name}\n")
+        market_ranking = sweep_module.rank_variants_by_consistency(all_sweep_df[all_sweep_df["market"] == market_name])
+        lines.append(_df_to_markdown_table(market_ranking) + "\n")
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text("\n".join(lines), encoding="utf-8")

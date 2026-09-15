@@ -203,6 +203,75 @@ def test_narrow_range_filter_blocks_breakout_without_prior_compression():
     assert signals == []
 
 
+def _minimal_long_breakout_row(**overrides) -> pd.Series:
+    """A row with just enough fields to reach `_evaluate_row`'s stop/sizing
+    logic directly, for testing dynamic stop/sizing in isolation from the
+    rest of the breakout conditions."""
+    base = {
+        "timestamp": pd.Timestamp("2024-01-07T00:15:00Z"),
+        "bias_trend": "up",
+        "breakout_up": True,
+        "breakout_down": False,
+        "close": 100.0,
+        "atr": 10.0,
+        "atr_sma": 5.0,  # atr(10) / atr_sma(5) = regime ratio of 2.0
+        "channel_width": float("nan"),
+        "prior_bar_narrow_range": None,
+        "volume_ratio": 1.0,
+        "hour_utc": 0,
+        "session": "asia",
+    }
+    base.update(overrides)
+    return pd.Series(base)
+
+
+def test_breakout_dynamic_stop_widens_with_expanded_volatility_regime():
+    sp = {**PARAMS["strategy"], "dynamic_stop_enabled": True}
+    row = _minimal_long_breakout_row()  # atr/atr_sma = 2.0
+
+    sig = DonchianBreakoutStrategy._evaluate_row(row, sp)
+
+    # stop = close - (atr_sl_multiplier * regime) * atr = 100 - (1.5*2.0)*10 = 70.
+    assert sig.stop_loss == pytest.approx(100.0 - 1.5 * 2.0 * 10.0)
+    assert sig.reasons["dynamic_stop"] is True
+
+
+def test_breakout_dynamic_stop_disabled_ignores_volatility_regime():
+    sp = {**PARAMS["strategy"], "dynamic_stop_enabled": False}
+    row = _minimal_long_breakout_row()
+
+    sig = DonchianBreakoutStrategy._evaluate_row(row, sp)
+
+    assert sig.stop_loss == pytest.approx(100.0 - 1.5 * 10.0)
+    assert "dynamic_stop" not in sig.reasons
+
+
+def test_breakout_dynamic_risk_reduces_position_risk_when_volatility_expanded():
+    sp = {**PARAMS["strategy"], "dynamic_risk_enabled": True}
+    row = _minimal_long_breakout_row()
+
+    sig = DonchianBreakoutStrategy._evaluate_row(row, sp)
+
+    assert sig.risk_multiplier == pytest.approx(0.5)  # 1 / regime(2.0)
+    assert sig.reasons["dynamic_risk"] is True
+
+
+def test_breakout_fade_combined_with_dynamic_stop():
+    # The combination the probability analysis actually pointed to: fade's
+    # direction has a real edge, dynamic_stop targets the fixed-stop/noise
+    # mismatch that was destroying it in execution.
+    sp = {**PARAMS["strategy"], "fade": True, "dynamic_stop_enabled": True}
+    row = _minimal_long_breakout_row()  # detected breakout is still bullish; fade flips it
+
+    sig = DonchianBreakoutStrategy._evaluate_row(row, sp)
+
+    assert sig.direction == "short"
+    # Short stop = close + (atr_sl_multiplier * regime) * atr = 100 + 30 = 130.
+    assert sig.stop_loss == pytest.approx(100.0 + 1.5 * 2.0 * 10.0)
+    assert sig.reasons["fade"] is True
+    assert sig.reasons["dynamic_stop"] is True
+
+
 def test_breakout_strategy_no_signal_without_channel_break():
     # Without the breakout candle (dataset cut short before it), the
     # channel is never exceeded -> there shouldn't be any signals.

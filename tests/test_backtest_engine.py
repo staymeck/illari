@@ -115,6 +115,30 @@ def test_commission_and_slippage_reduce_pnl():
     assert with_cost.trades[0].exit_price < no_cost.trades[0].exit_price
 
 
+def test_risk_multiplier_scales_position_size():
+    df = _entry_df(
+        [
+            {"open": 99, "high": 101, "low": 98, "close": 100},
+            {"open": 100, "high": 103, "low": 99, "close": 102},
+            {"open": 102, "high": 111, "low": 101, "close": 109},
+        ]
+    )
+    full_risk = _signal()  # risk_multiplier defaults to 1.0
+    half_risk = Signal(
+        timestamp=_ts(0), direction="long", entry_price=100.0, stop_loss=95.0, take_profit=110.0,
+        confidence_score=4, hour_utc=0, session="asia", reasons={}, risk_multiplier=0.5,
+    )
+
+    result_full = run_backtest([full_risk], df, initial_capital=10000, risk_per_trade_pct=1.0,
+                                commission_pct=0.0, slippage_pct=0.0)
+    result_half = run_backtest([half_risk], df, initial_capital=10000, risk_per_trade_pct=1.0,
+                                commission_pct=0.0, slippage_pct=0.0)
+
+    # risk_amount = 10000*1%*0.5 = 50; risk_per_unit = 5 -> position_size = 10 (half of the full-risk case).
+    assert result_half.trades[0].position_size == pytest.approx(result_full.trades[0].position_size * 0.5)
+    assert result_half.trades[0].pnl == pytest.approx(result_full.trades[0].pnl * 0.5)
+
+
 def test_equity_curve_starts_at_initial_capital():
     df = _entry_df([{"open": 99, "high": 101, "low": 98, "close": 100}])
     result = run_backtest([], df, initial_capital=5000, risk_per_trade_pct=1.0,

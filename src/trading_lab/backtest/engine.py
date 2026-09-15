@@ -9,6 +9,10 @@ Simplifications of this phase (documented, not hidden):
   - Entry executes at the close price of the candle that generated the
     signal (that's when all of that candle's information is already
     available), with slippage applied.
+  - Position size is `risk_per_trade_pct` of current capital, divided by
+    the stop distance, further scaled by `sig.risk_multiplier` (1.0 unless
+    a strategy's `dynamic_risk_enabled` sets it dynamically based on the
+    current volatility regime — see indicators/volatility.py).
 """
 
 from __future__ import annotations
@@ -83,7 +87,7 @@ def run_backtest(
         risk_per_unit = abs(entry_price - sig.stop_loss)
         if risk_per_unit <= 0:
             continue
-        risk_amount = capital * (risk_per_trade_pct / 100.0)
+        risk_amount = capital * (risk_per_trade_pct / 100.0) * sig.risk_multiplier
         position_size = risk_amount / risk_per_unit
 
         exit_price, exit_time, exit_reason = None, None, "end_of_data"
