@@ -1,0 +1,57 @@
+# Wyckoff-style accumulation breakout: instead of confirming a trend
+# already under way (structure/Fibonacci/candle, all the existing
+# catalog's strategies), this looks for a tight trading range showing
+# net buy-side Volume Spread Analysis absorption, then enters on the
+# breakout itself, timed by what the range's own volume behavior
+# suggested was coming — see src/analysis/wyckoff.py for the full
+# reasoning (motivated directly by the user's own framing: candle
+# patterns answer "did a move already start", not "is the market
+# accumulating liquidity right now").
+#
+# context.required: "any" - deliberately no trend-direction gate before
+# the setup even runs. A range is, by construction, NOT trending yet;
+# the setup's own accumulation_bias + breakout are what decide direction.
+name: wyckoff_accumulation
+
+engine:
+  lookback_bars: 200
+  swing_order: 3
+
+context:
+  piece: dow_trend
+  required: any
+  params:
+    order: 3
+    lookback_swings: 2
+
+setup:
+  piece: wyckoff_accumulation_breakout
+  params:
+    lookback: 20
+    max_range_pct: 8.0
+    volume_window: 20
+    volume_threshold: 1.5
+    close_position_threshold: 0.3
+    min_accumulation_bias: 0.15
+    breakout_volume_mult: 1.2
+
+confirmations: []
+
+risk:
+  stop:
+    piece: range_low_stop
+    params:
+      buffer_pct: 0.5
+      fallback_pct: 1.0
+  target:
+    piece: range_projection_target
+    params:
+      lookback: 20
+      max_range_pct: 8.0
+      fallback_ratio: 2.0
+      min_risk_reward: 0.5
+
+style:
+  max_holding_bars: 24
+  fee_pct: 0.1
+  initial_equity: 10000.0
